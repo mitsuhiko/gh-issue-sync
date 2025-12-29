@@ -82,11 +82,11 @@ func (c *InitCommand) Usage() string {
 }
 
 func (c *PullCommand) Usage() string {
-	return "[OPTIONS] [issue...]"
+	return "[OPTIONS]"
 }
 
 func (c *PushCommand) Usage() string {
-	return "[OPTIONS] [issue...]"
+	return "[OPTIONS]"
 }
 
 func (c *StatusCommand) Usage() string {
@@ -94,15 +94,15 @@ func (c *StatusCommand) Usage() string {
 }
 
 func (c *NewCommand) Usage() string {
-	return "[OPTIONS] [title]"
+	return "[OPTIONS]"
 }
 
 func (c *CloseCommand) Usage() string {
-	return "[OPTIONS] <issue>"
+	return "[OPTIONS]"
 }
 
 func (c *ReopenCommand) Usage() string {
-	return "[OPTIONS] <issue>"
+	return "[OPTIONS]"
 }
 
 func (c *InitCommand) Execute(_ []string) error {
@@ -186,6 +186,7 @@ func main() {
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok {
 			if flagsErr.Type == flags.ErrHelp {
+				fmt.Fprint(os.Stdout, flagsErr.Message)
 				return
 			}
 			fmt.Fprintf(os.Stderr, "error: %s\n\n", flagsErr.Message)

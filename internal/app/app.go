@@ -134,6 +134,7 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 	}
 
 	var conflicts []string
+	unchanged := 0
 	for _, remote := range remoteIssues {
 		remote.State = strings.ToLower(remote.State)
 		remote.SyncedAt = ptrTime(a.Now().UTC())
@@ -159,6 +160,13 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 			targetDir = p.ClosedDir
 		}
 		newPath := issue.PathFor(targetDir, remote.Number, remote.Title)
+		contentChanged := !hasLocal || !issue.EqualIgnoringSyncedAt(local.Issue, remote)
+		pathChanged := hasLocal && local.Path != newPath
+		if hasOriginal && !contentChanged && !pathChanged {
+			unchanged++
+			continue
+		}
+
 		if hasLocal && local.Path != newPath {
 			if err := os.Rename(local.Path, newPath); err != nil {
 				return err
@@ -169,6 +177,21 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 		}
 		if err := writeOriginalIssue(p, remote); err != nil {
 			return err
+		}
+		if !hasLocal {
+			fmt.Fprintf(a.Out, "Pulled issue %s\n", remote.Number)
+			continue
+		}
+		summary := ""
+		if contentChanged {
+			summary = changeSummary(diffIssue(local.Issue, remote))
+		}
+		if summary != "" {
+			fmt.Fprintf(a.Out, "Updated issue %s (%s)\n", remote.Number, summary)
+		} else if pathChanged {
+			fmt.Fprintf(a.Out, "Renamed issue file %s\n", remote.Number)
+		} else {
+			fmt.Fprintf(a.Out, "Updated issue %s\n", remote.Number)
 		}
 	}
 
@@ -183,6 +206,9 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 	if len(conflicts) > 0 {
 		sort.Strings(conflicts)
 		fmt.Fprintf(a.Err, "Conflicts (local changes, skipped): %s\n", strings.Join(conflicts, ", "))
+	}
+	if unchanged > 0 {
+		fmt.Fprintf(a.Out, "No changes needed for %d issue(s)\n", unchanged)
 	}
 	return nil
 }
@@ -205,6 +231,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 	}
 
 	mapping := map[string]string{}
+	createdNumbers := map[string]struct{}{}
 	for i := range filteredIssues {
 		item := &filteredIssues[i]
 		if !item.Issue.Number.IsLocal() {
@@ -220,6 +247,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		}
 		oldNumber := item.Issue.Number.String()
 		mapping[oldNumber] = newNumber
+		createdNumbers[newNumber] = struct{}{}
 		item.Issue.Number = issue.IssueNumber(newNumber)
 		item.Issue.SyncedAt = ptrTime(a.Now().UTC())
 		newPath := issue.PathFor(dirForState(p, item.State), item.Issue.Number, item.Issue.Title)
@@ -235,6 +263,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		if err := writeOriginalIssue(p, item.Issue); err != nil {
 			return err
 		}
+		fmt.Fprintf(a.Out, "Created issue %s from %s\n", newNumber, oldNumber)
 	}
 
 	if len(mapping) > 0 {
@@ -252,6 +281,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 				if err := issue.WriteFile(allIssues[i].Path, allIssues[i].Issue); err != nil {
 					return err
 				}
+				fmt.Fprintf(a.Out, "Updated references in %s\n", relPath(a.Root, allIssues[i].Path))
 			}
 		}
 		if len(args) > 0 {
@@ -268,6 +298,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 	}
 
 	var conflicts []string
+	unchanged := 0
 	for _, item := range filteredIssues {
 		if item.Issue.Number.IsLocal() {
 			continue
@@ -275,6 +306,9 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		original, hasOriginal := readOriginalIssue(p, item.Issue.Number.String())
 		localChanged := !hasOriginal || !issue.EqualIgnoringSyncedAt(item.Issue, original)
 		if !localChanged {
+			if _, ok := createdNumbers[item.Issue.Number.String()]; !ok {
+				unchanged++
+			}
 			continue
 		}
 		if opts.DryRun {
@@ -317,11 +351,20 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		if err := writeOriginalIssue(p, item.Issue); err != nil {
 			return err
 		}
+		summary := changeSummary(change)
+		if summary != "" {
+			fmt.Fprintf(a.Out, "Updated issue %s (%s)\n", item.Issue.Number, summary)
+		} else {
+			fmt.Fprintf(a.Out, "Updated issue %s\n", item.Issue.Number)
+		}
 	}
 
 	if len(conflicts) > 0 {
 		sort.Strings(conflicts)
 		fmt.Fprintf(a.Err, "Conflicts (remote changed, skipped): %s\n", strings.Join(conflicts, ", "))
+	}
+	if unchanged > 0 {
+		fmt.Fprintf(a.Out, "No changes needed for %d issue(s)\n", unchanged)
 	}
 	return nil
 }
@@ -714,6 +757,29 @@ func diffIssue(original issue.Issue, local issue.Issue) ghcli.IssueChange {
 
 func hasEdits(change ghcli.IssueChange) bool {
 	return change.Title != nil || change.Body != nil || change.Milestone != nil || len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 || len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0
+}
+
+func changeSummary(change ghcli.IssueChange) string {
+	parts := []string{}
+	if change.Title != nil {
+		parts = append(parts, "title")
+	}
+	if change.Body != nil {
+		parts = append(parts, "body")
+	}
+	if len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 {
+		parts = append(parts, "labels")
+	}
+	if len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0 {
+		parts = append(parts, "assignees")
+	}
+	if change.Milestone != nil {
+		parts = append(parts, "milestone")
+	}
+	if change.StateTransition != nil || change.StateReason != nil {
+		parts = append(parts, "state")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func diffStringSet(old, new []string) ([]string, []string) {
