@@ -648,6 +648,79 @@ func (c *Client) CreateLabel(ctx context.Context, name, color string) error {
 	return err
 }
 
+// Milestone represents a GitHub milestone.
+type Milestone struct {
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	DueOn       *string `json:"due_on"` // ISO 8601 format
+	State       string  `json:"state"`  // open or closed
+}
+
+// ListMilestones fetches all milestones from the repository.
+func (c *Client) ListMilestones(ctx context.Context) ([]Milestone, error) {
+	// Use gh api to get milestones (gh doesn't have a built-in milestone list command)
+	// We need to fetch both open and closed milestones
+	var allMilestones []Milestone
+
+	owner, repo := splitRepo(c.repo)
+	if owner == "" || repo == "" {
+		return nil, fmt.Errorf("invalid repository format")
+	}
+
+	for _, state := range []string{"open", "closed"} {
+		// Use query parameters in URL for GET request
+		// Note: gh api doesn't support --repo, so we must expand the repo in the URL
+		endpoint := fmt.Sprintf("repos/%s/%s/milestones?state=%s&per_page=100", owner, repo, state)
+		args := []string{"api", endpoint, "--paginate", "-q", ".[]"}
+		out, err := c.runner.Run(ctx, "gh", args...)
+		if err != nil {
+			// If there are no milestones, gh api might return an error or empty
+			continue
+		}
+		if strings.TrimSpace(out) == "" {
+			continue
+		}
+
+		// Parse line-delimited JSON objects
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var m struct {
+				Title       string  `json:"title"`
+				Description string  `json:"description"`
+				DueOn       *string `json:"due_on"`
+				State       string  `json:"state"`
+			}
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				continue
+			}
+			allMilestones = append(allMilestones, Milestone{
+				Title:       m.Title,
+				Description: m.Description,
+				DueOn:       m.DueOn,
+				State:       m.State,
+			})
+		}
+	}
+
+	return allMilestones, nil
+}
+
+// CreateMilestone creates a new milestone with the given title.
+func (c *Client) CreateMilestone(ctx context.Context, title string) error {
+	owner, repo := splitRepo(c.repo)
+	if owner == "" || repo == "" {
+		return fmt.Errorf("invalid repository format")
+	}
+
+	endpoint := fmt.Sprintf("repos/%s/%s/milestones", owner, repo)
+	args := []string{"api", endpoint, "-X", "POST", "-f", "title=" + title}
+	_, err := c.runner.Run(ctx, "gh", args...)
+	return err
+}
+
 // IssueChange captures the edits we need to apply to an issue.
 type IssueChange struct {
 	Title           *string

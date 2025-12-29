@@ -88,6 +88,20 @@ type LabelEntry struct {
 	Color string `json:"color"`
 }
 
+// MilestoneCache stores the synced milestones from GitHub
+type MilestoneCache struct {
+	Milestones []MilestoneEntry `json:"milestones"`
+	SyncedAt   time.Time        `json:"synced_at"`
+}
+
+// MilestoneEntry represents a single milestone
+type MilestoneEntry struct {
+	Title       string  `json:"title"`
+	Description string  `json:"description,omitempty"`
+	DueOn       *string `json:"due_on,omitempty"`
+	State       string  `json:"state"`
+}
+
 func New(root string, runner ghcli.Runner, out io.Writer, errOut io.Writer) *App {
 	return &App{
 		Root:   root,
@@ -332,6 +346,30 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 				fmt.Fprintf(a.Err, "%s saving label cache: %v\n", t.WarningText("Warning:"), err)
 			}
 		}
+
+		// Fetch and save milestones to cache
+		milestones, err := client.ListMilestones(ctx)
+		if err != nil {
+			fmt.Fprintf(a.Err, "%s fetching milestones: %v\n", t.WarningText("Warning:"), err)
+		} else {
+			entries := make([]MilestoneEntry, 0, len(milestones))
+			for _, m := range milestones {
+				entries = append(entries, MilestoneEntry{
+					Title:       m.Title,
+					Description: m.Description,
+					DueOn:       m.DueOn,
+					State:       m.State,
+				})
+			}
+			// Sort for consistent output
+			sort.Slice(entries, func(i, j int) bool {
+				return strings.ToLower(entries[i].Title) < strings.ToLower(entries[j].Title)
+			})
+			msCache := MilestoneCache{Milestones: entries, SyncedAt: now}
+			if err := saveMilestoneCache(p, msCache); err != nil {
+				fmt.Fprintf(a.Err, "%s saving milestone cache: %v\n", t.WarningText("Warning:"), err)
+			}
+		}
 	}
 
 	if len(conflicts) > 0 {
@@ -473,6 +511,30 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		labelCache = labelsFromColorMap(labelColors, a.Now().UTC())
 	}
 
+	// Load milestone cache (or fetch from remote if not cached)
+	milestoneCache, err := loadMilestoneCache(p)
+	if err != nil {
+		fmt.Fprintf(a.Err, "%s loading milestone cache: %v\n", t.WarningText("Warning:"), err)
+	}
+	knownMilestones := milestoneNames(milestoneCache)
+
+	// If no cache, fetch from remote
+	if len(knownMilestones) == 0 {
+		milestones, err := client.ListMilestones(ctx)
+		if err == nil {
+			for _, m := range milestones {
+				knownMilestones[strings.ToLower(m.Title)] = struct{}{}
+				milestoneCache.Milestones = append(milestoneCache.Milestones, MilestoneEntry{
+					Title:       m.Title,
+					Description: m.Description,
+					DueOn:       m.DueOn,
+					State:       m.State,
+				})
+			}
+			milestoneCache.SyncedAt = a.Now().UTC()
+		}
+	}
+
 	localIssues, err := loadLocalIssues(p)
 	if err != nil {
 		return err
@@ -482,16 +544,20 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		return err
 	}
 
-	// Collect all labels that will be needed
+	// Collect all labels and milestones that will be needed
 	neededLabels := make(map[string]struct{})
+	neededMilestones := make(map[string]struct{})
 	for _, item := range filteredIssues {
 		for _, label := range item.Issue.Labels {
 			neededLabels[label] = struct{}{}
 		}
+		if item.Issue.Milestone != "" {
+			neededMilestones[item.Issue.Milestone] = struct{}{}
+		}
 	}
 
 	// Create any missing labels
-	cacheUpdated := false
+	labelCacheUpdated := false
 	for label := range neededLabels {
 		if _, exists := labelColors[strings.ToLower(label)]; !exists {
 			if opts.DryRun {
@@ -506,15 +572,45 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			fmt.Fprintf(a.Out, "%s %s\n", t.SuccessText("Created label"), label)
 			labelColors[strings.ToLower(label)] = color
 			labelCache.Labels = append(labelCache.Labels, LabelEntry{Name: label, Color: color})
-			cacheUpdated = true
+			labelCacheUpdated = true
+		}
+	}
+
+	// Create any missing milestones
+	milestoneCacheUpdated := false
+	for milestone := range neededMilestones {
+		if _, exists := knownMilestones[strings.ToLower(milestone)]; !exists {
+			if opts.DryRun {
+				fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Would create milestone"), milestone)
+				continue
+			}
+			if err := client.CreateMilestone(ctx, milestone); err != nil {
+				fmt.Fprintf(a.Err, "%s creating milestone %q: %v\n", t.WarningText("Warning:"), milestone, err)
+				continue
+			}
+			fmt.Fprintf(a.Out, "%s %s\n", t.SuccessText("Created milestone"), milestone)
+			knownMilestones[strings.ToLower(milestone)] = struct{}{}
+			milestoneCache.Milestones = append(milestoneCache.Milestones, MilestoneEntry{
+				Title: milestone,
+				State: "open",
+			})
+			milestoneCacheUpdated = true
 		}
 	}
 
 	// Save updated label cache
-	if cacheUpdated && !opts.DryRun {
+	if labelCacheUpdated && !opts.DryRun {
 		labelCache.SyncedAt = a.Now().UTC()
 		if err := saveLabelCache(p, labelCache); err != nil {
 			fmt.Fprintf(a.Err, "%s saving label cache: %v\n", t.WarningText("Warning:"), err)
+		}
+	}
+
+	// Save updated milestone cache
+	if milestoneCacheUpdated && !opts.DryRun {
+		milestoneCache.SyncedAt = a.Now().UTC()
+		if err := saveMilestoneCache(p, milestoneCache); err != nil {
+			fmt.Fprintf(a.Err, "%s saving milestone cache: %v\n", t.WarningText("Warning:"), err)
 		}
 	}
 
@@ -1607,6 +1703,39 @@ func labelsFromColorMap(colors map[string]string, syncedAt time.Time) LabelCache
 		return strings.ToLower(labels[i].Name) < strings.ToLower(labels[j].Name)
 	})
 	return LabelCache{Labels: labels, SyncedAt: syncedAt}
+}
+
+func loadMilestoneCache(p paths.Paths) (MilestoneCache, error) {
+	var cache MilestoneCache
+	data, err := os.ReadFile(p.MilestonesPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cache, nil
+		}
+		return cache, err
+	}
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return cache, err
+	}
+	return cache, nil
+}
+
+func saveMilestoneCache(p paths.Paths, cache MilestoneCache) error {
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(p.MilestonesPath, data, 0o644)
+}
+
+// milestoneNames returns a set of milestone titles (case-insensitive lookup).
+func milestoneNames(cache MilestoneCache) map[string]struct{} {
+	m := make(map[string]struct{}, len(cache.Milestones))
+	for _, ms := range cache.Milestones {
+		m[strings.ToLower(ms.Title)] = struct{}{}
+	}
+	return m
 }
 
 // randomLabelColor returns a random visually pleasing color for labels.

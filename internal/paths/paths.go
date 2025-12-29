@@ -6,24 +6,26 @@ import (
 )
 
 const (
-	IssuesDirName    = ".issues"
-	SyncDirName      = ".sync"
-	OriginalsDirName = "originals"
-	OpenDirName      = "open"
-	ClosedDirName    = "closed"
-	ConfigFileName   = "config.json"
-	LabelsFileName   = "labels.json"
+	IssuesDirName      = ".issues"
+	SyncDirName        = ".sync"
+	OriginalsDirName   = "originals"
+	OpenDirName        = "open"
+	ClosedDirName      = "closed"
+	ConfigFileName     = "config.json"
+	LabelsFileName     = "labels.json"
+	MilestonesFileName = "milestones.json"
 )
 
 type Paths struct {
-	Root         string
-	IssuesDir    string
-	SyncDir      string
-	OriginalsDir string
-	OpenDir      string
-	ClosedDir    string
-	ConfigPath   string
-	LabelsPath   string
+	Root           string
+	IssuesDir      string
+	SyncDir        string
+	OriginalsDir   string
+	OpenDir        string
+	ClosedDir      string
+	ConfigPath     string
+	LabelsPath     string
+	MilestonesPath string
 }
 
 func New(root string) Paths {
@@ -34,16 +36,18 @@ func New(root string) Paths {
 	closedDir := filepath.Join(issuesDir, ClosedDirName)
 	configPath := filepath.Join(syncDir, ConfigFileName)
 	labelsPath := filepath.Join(syncDir, LabelsFileName)
+	milestonesPath := filepath.Join(syncDir, MilestonesFileName)
 
 	return Paths{
-		Root:         root,
-		IssuesDir:    issuesDir,
-		SyncDir:      syncDir,
-		OriginalsDir: originalsDir,
-		OpenDir:      openDir,
-		ClosedDir:    closedDir,
-		ConfigPath:   configPath,
-		LabelsPath:   labelsPath,
+		Root:           root,
+		IssuesDir:      issuesDir,
+		SyncDir:        syncDir,
+		OriginalsDir:   originalsDir,
+		OpenDir:        openDir,
+		ClosedDir:      closedDir,
+		ConfigPath:     configPath,
+		LabelsPath:     labelsPath,
+		MilestonesPath: milestonesPath,
 	}
 }
 
