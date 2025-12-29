@@ -179,19 +179,16 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 			return err
 		}
 		if !hasLocal {
-			fmt.Fprintf(a.Out, "Pulled issue %s\n", remote.Number)
+			fmt.Fprintf(a.Out, "A Issue #%s: %s\n", remote.Number, remote.Title)
 			continue
 		}
-		summary := ""
-		if contentChanged {
-			summary = changeSummary(diffIssue(local.Issue, remote))
+		lines := pullChangeLines(local.Issue, remote)
+		if len(lines) == 0 && pathChanged {
+			lines = append(lines, fmt.Sprintf("file: %q -> %q", relPath(a.Root, local.Path), relPath(a.Root, newPath)))
 		}
-		if summary != "" {
-			fmt.Fprintf(a.Out, "Updated issue %s (%s)\n", remote.Number, summary)
-		} else if pathChanged {
-			fmt.Fprintf(a.Out, "Renamed issue file %s\n", remote.Number)
-		} else {
-			fmt.Fprintf(a.Out, "Updated issue %s\n", remote.Number)
+		fmt.Fprintf(a.Out, "U Issue #%s: %s\n", remote.Number, remote.Title)
+		for _, line := range lines {
+			fmt.Fprintf(a.Out, "  %s\n", line)
 		}
 	}
 
@@ -780,6 +777,85 @@ func changeSummary(change ghcli.IssueChange) string {
 		parts = append(parts, "state")
 	}
 	return strings.Join(parts, ", ")
+}
+
+func pullChangeLines(oldIssue, newIssue issue.Issue) []string {
+	oldIssue = issue.Normalize(oldIssue)
+	newIssue = issue.Normalize(newIssue)
+
+	lines := []string{}
+	if oldIssue.Title != newIssue.Title {
+		lines = append(lines, fmt.Sprintf("title: %q -> %q", oldIssue.Title, newIssue.Title))
+	}
+	if oldIssue.Body != newIssue.Body {
+		lines = append(lines, fmt.Sprintf("body: %s -> %s", formatBodySummary(oldIssue.Body), formatBodySummary(newIssue.Body)))
+	}
+	if !stringSlicesEqual(oldIssue.Labels, newIssue.Labels) {
+		lines = append(lines, fmt.Sprintf("labels: %s -> %s", formatStringList(oldIssue.Labels), formatStringList(newIssue.Labels)))
+	}
+	if !stringSlicesEqual(oldIssue.Assignees, newIssue.Assignees) {
+		lines = append(lines, fmt.Sprintf("assignees: %s -> %s", formatStringList(oldIssue.Assignees), formatStringList(newIssue.Assignees)))
+	}
+	if oldIssue.Milestone != newIssue.Milestone {
+		lines = append(lines, fmt.Sprintf("milestone: %s -> %s", formatOptionalString(oldIssue.Milestone), formatOptionalString(newIssue.Milestone)))
+	}
+	if oldIssue.State != newIssue.State {
+		lines = append(lines, fmt.Sprintf("state: %s -> %s", formatOptionalString(oldIssue.State), formatOptionalString(newIssue.State)))
+	}
+	if normalizeOptional(oldIssue.StateReason) != normalizeOptional(newIssue.StateReason) {
+		lines = append(lines, fmt.Sprintf("state_reason: %s -> %s", formatOptionalStringPtr(oldIssue.StateReason), formatOptionalStringPtr(newIssue.StateReason)))
+	}
+	return lines
+}
+
+func formatBodySummary(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "<empty>"
+	}
+	return fmt.Sprintf("%d chars", len(body))
+}
+
+func formatOptionalString(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "<none>"
+	}
+	return fmt.Sprintf("%q", value)
+}
+
+func formatOptionalStringPtr(value *string) string {
+	if value == nil {
+		return "<none>"
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return "<none>"
+	}
+	return fmt.Sprintf("%q", trimmed)
+}
+
+func formatStringList(items []string) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		quoted = append(quoted, fmt.Sprintf("%q", item))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func diffStringSet(old, new []string) ([]string, []string) {
