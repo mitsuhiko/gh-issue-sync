@@ -33,7 +33,14 @@ func (c *Client) withRepo(args []string) []string {
 }
 
 type apiLabel struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// Label represents a GitHub label with its color.
+type Label struct {
+	Name  string
+	Color string // Hex color without #
 }
 
 type apiUser struct {
@@ -185,6 +192,24 @@ func parseIssueNumber(output string) (string, error) {
 		return "", fmt.Errorf("unable to parse issue number from output: %q", strings.TrimSpace(output))
 	}
 	return match[1], nil
+}
+
+// ListLabels fetches all labels from the repository with their colors.
+func (c *Client) ListLabels(ctx context.Context) ([]Label, error) {
+	args := []string{"label", "list", "--json", "name,color", "--limit", "1000"}
+	out, err := c.runner.Run(ctx, "gh", c.withRepo(args)...)
+	if err != nil {
+		return nil, err
+	}
+	var payload []apiLabel
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		return nil, err
+	}
+	labels := make([]Label, 0, len(payload))
+	for _, l := range payload {
+		labels = append(labels, Label{Name: l.Name, Color: l.Color})
+	}
+	return labels, nil
 }
 
 // IssueChange captures the edits we need to apply to an issue.

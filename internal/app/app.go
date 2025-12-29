@@ -16,6 +16,7 @@ import (
 	"github.com/mitsuhiko/gh-issue-sync/internal/ghcli"
 	"github.com/mitsuhiko/gh-issue-sync/internal/issue"
 	"github.com/mitsuhiko/gh-issue-sync/internal/paths"
+	"github.com/mitsuhiko/gh-issue-sync/internal/theme"
 )
 
 type App struct {
@@ -24,6 +25,7 @@ type App struct {
 	Now    func() time.Time
 	Out    io.Writer
 	Err    io.Writer
+	Theme  *theme.Theme
 }
 
 type PullOptions struct {
@@ -58,6 +60,7 @@ func New(root string, runner ghcli.Runner, out io.Writer, errOut io.Writer) *App
 		Now:    time.Now,
 		Out:    out,
 		Err:    errOut,
+		Theme:  theme.Default(),
 	}
 }
 
@@ -88,7 +91,8 @@ func (a *App) Init(ctx context.Context, owner, repo string) error {
 	if err := config.Save(p.ConfigPath, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Out, "Initialized %s/%s in %s\n", owner, repo, p.IssuesDir)
+	t := a.Theme
+	fmt.Fprintf(a.Out, "%s %s %s %s\n", t.SuccessText("Initialized"), t.AccentText(owner+"/"+repo), t.MutedText("in"), p.IssuesDir)
 	return nil
 }
 
@@ -99,6 +103,10 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 		return err
 	}
 	client := ghcli.NewClient(a.Runner, repoSlug(cfg))
+	t := a.Theme
+
+	// Fetch label colors for nice output
+	labelColors := a.fetchLabelColors(ctx, client)
 
 	var remoteIssues []issue.Issue
 	if len(args) > 0 {
@@ -179,16 +187,16 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 			return err
 		}
 		if !hasLocal {
-			fmt.Fprintf(a.Out, "A Issue #%s: %s\n", remote.Number, remote.Title)
+			fmt.Fprintln(a.Out, t.FormatIssueHeader("A", remote.Number.String(), remote.Title))
 			continue
 		}
-		lines := pullChangeLines(local.Issue, remote)
+		lines := a.formatChangeLines(local.Issue, remote, labelColors)
 		if len(lines) == 0 && pathChanged {
-			lines = append(lines, fmt.Sprintf("file: %q -> %q", relPath(a.Root, local.Path), relPath(a.Root, newPath)))
+			lines = append(lines, t.FormatChange("file", fmt.Sprintf("%q", relPath(a.Root, local.Path)), fmt.Sprintf("%q", relPath(a.Root, newPath))))
 		}
-		fmt.Fprintf(a.Out, "U Issue #%s: %s\n", remote.Number, remote.Title)
+		fmt.Fprintln(a.Out, t.FormatIssueHeader("U", remote.Number.String(), remote.Title))
 		for _, line := range lines {
-			fmt.Fprintf(a.Out, "  %s\n", line)
+			fmt.Fprintln(a.Out, line)
 		}
 	}
 
@@ -202,12 +210,26 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 
 	if len(conflicts) > 0 {
 		sort.Strings(conflicts)
-		fmt.Fprintf(a.Err, "Conflicts (local changes, skipped): %s\n", strings.Join(conflicts, ", "))
+		fmt.Fprintf(a.Err, "%s %s\n", t.WarningText("Conflicts (local changes, skipped):"), strings.Join(conflicts, ", "))
 	}
 	if unchanged > 0 {
-		fmt.Fprintf(a.Out, "No changes needed for %d issue(s)\n", unchanged)
+		fmt.Fprintf(a.Out, "%s\n", t.MutedText(fmt.Sprintf("No changes needed for %d issue(s)", unchanged)))
 	}
 	return nil
+}
+
+// fetchLabelColors fetches label colors from GitHub, returning a map of name -> hex color.
+// Errors are silently ignored (we'll just use default colors).
+func (a *App) fetchLabelColors(ctx context.Context, client *ghcli.Client) map[string]string {
+	colors := make(map[string]string)
+	labels, err := client.ListLabels(ctx)
+	if err != nil {
+		return colors
+	}
+	for _, l := range labels {
+		colors[l.Name] = l.Color
+	}
+	return colors
 }
 
 func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
@@ -217,6 +239,10 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		return err
 	}
 	client := ghcli.NewClient(a.Runner, repoSlug(cfg))
+	t := a.Theme
+
+	// Fetch label colors for nice output
+	labelColors := a.fetchLabelColors(ctx, client)
 
 	localIssues, err := loadLocalIssues(p)
 	if err != nil {
@@ -235,7 +261,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			continue
 		}
 		if opts.DryRun {
-			fmt.Fprintf(a.Out, "Would create issue %s\n", item.Issue.Title)
+			fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Would create issue"), item.Issue.Title)
 			continue
 		}
 		newNumber, err := client.CreateIssue(ctx, item.Issue)
@@ -260,7 +286,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		if err := writeOriginalIssue(p, item.Issue); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.Out, "Created issue %s from %s\n", newNumber, oldNumber)
+		fmt.Fprintln(a.Out, t.FormatIssueHeader("A", newNumber, item.Issue.Title))
 	}
 
 	if len(mapping) > 0 {
@@ -272,13 +298,13 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			changed := applyMapping(&allIssues[i].Issue, mapping)
 			if changed {
 				if opts.DryRun {
-					fmt.Fprintf(a.Out, "Would update references in %s\n", allIssues[i].Path)
+					fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Would update references in"), allIssues[i].Path)
 					continue
 				}
 				if err := issue.WriteFile(allIssues[i].Path, allIssues[i].Issue); err != nil {
 					return err
 				}
-				fmt.Fprintf(a.Out, "Updated references in %s\n", relPath(a.Root, allIssues[i].Path))
+				fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Updated references in"), relPath(a.Root, allIssues[i].Path))
 			}
 		}
 		if len(args) > 0 {
@@ -309,7 +335,7 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			continue
 		}
 		if opts.DryRun {
-			fmt.Fprintf(a.Out, "Would push issue %s\n", item.Issue.Number)
+			fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Would push issue"), t.AccentText("#"+item.Issue.Number.String()))
 			continue
 		}
 		remote, err := client.GetIssue(ctx, item.Issue.Number.String())
@@ -348,20 +374,18 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		if err := writeOriginalIssue(p, item.Issue); err != nil {
 			return err
 		}
-		summary := changeSummary(change)
-		if summary != "" {
-			fmt.Fprintf(a.Out, "Updated issue %s (%s)\n", item.Issue.Number, summary)
-		} else {
-			fmt.Fprintf(a.Out, "Updated issue %s\n", item.Issue.Number)
+		fmt.Fprintln(a.Out, t.FormatIssueHeader("U", item.Issue.Number.String(), item.Issue.Title))
+		for _, line := range a.formatChangeLines(original, item.Issue, labelColors) {
+			fmt.Fprintln(a.Out, line)
 		}
 	}
 
 	if len(conflicts) > 0 {
 		sort.Strings(conflicts)
-		fmt.Fprintf(a.Err, "Conflicts (remote changed, skipped): %s\n", strings.Join(conflicts, ", "))
+		fmt.Fprintf(a.Err, "%s %s\n", t.WarningText("Conflicts (remote changed, skipped):"), strings.Join(conflicts, ", "))
 	}
 	if unchanged > 0 {
-		fmt.Fprintf(a.Out, "No changes needed for %d issue(s)\n", unchanged)
+		fmt.Fprintf(a.Out, "%s\n", t.MutedText(fmt.Sprintf("No changes needed for %d issue(s)", unchanged)))
 	}
 	return nil
 }
@@ -372,12 +396,13 @@ func (a *App) Status(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t := a.Theme
 
-	fmt.Fprintf(a.Out, "Repository: %s/%s\n", cfg.Repository.Owner, cfg.Repository.Repo)
+	fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Repository:"), t.AccentText(cfg.Repository.Owner+"/"+cfg.Repository.Repo))
 	if cfg.Sync.LastFullPull != nil {
-		fmt.Fprintf(a.Out, "Last full pull: %s\n\n", cfg.Sync.LastFullPull.Format(time.RFC3339))
+		fmt.Fprintf(a.Out, "%s %s\n\n", t.MutedText("Last full pull:"), cfg.Sync.LastFullPull.Format(time.RFC3339))
 	} else {
-		fmt.Fprintf(a.Out, "Last full pull: never\n\n")
+		fmt.Fprintf(a.Out, "%s %s\n\n", t.MutedText("Last full pull:"), t.WarningText("never"))
 	}
 
 	localIssues, err := loadLocalIssues(p)
@@ -408,25 +433,25 @@ func (a *App) Status(ctx context.Context) error {
 
 	if len(modified) > 0 {
 		sort.Strings(modified)
-		fmt.Fprintln(a.Out, "Modified locally:")
+		fmt.Fprintln(a.Out, t.Bold("Modified locally:"))
 		for _, path := range modified {
-			fmt.Fprintf(a.Out, "  M %s\n", relPath(a.Root, path))
+			fmt.Fprintf(a.Out, "  %s %s\n", t.FormatStatus("M"), relPath(a.Root, path))
 		}
 		fmt.Fprintln(a.Out)
 	}
 	if len(newLocal) > 0 {
 		sort.Strings(newLocal)
-		fmt.Fprintln(a.Out, "New local issues:")
+		fmt.Fprintln(a.Out, t.Bold("New local issues:"))
 		for _, path := range newLocal {
-			fmt.Fprintf(a.Out, "  A %s\n", relPath(a.Root, path))
+			fmt.Fprintf(a.Out, "  %s %s\n", t.FormatStatus("A"), relPath(a.Root, path))
 		}
 		fmt.Fprintln(a.Out)
 	}
 	if len(stateChanges) > 0 {
 		sort.Strings(stateChanges)
-		fmt.Fprintln(a.Out, "State changes:")
+		fmt.Fprintln(a.Out, t.Bold("State changes:"))
 		for _, path := range stateChanges {
-			fmt.Fprintf(a.Out, "  -> %s\n", relPath(a.Root, path))
+			fmt.Fprintf(a.Out, "  %s %s\n", t.AccentText("->"), relPath(a.Root, path))
 		}
 	}
 	return nil
@@ -488,7 +513,7 @@ func (a *App) NewIssue(ctx context.Context, title string, opts NewOptions) error
 		}
 		path = updatedPath
 	}
-	fmt.Fprintf(a.Out, "Created %s\n", relPath(a.Root, path))
+	fmt.Fprintf(a.Out, "%s %s\n", a.Theme.SuccessText("Created"), relPath(a.Root, path))
 	return nil
 }
 
@@ -756,56 +781,73 @@ func hasEdits(change ghcli.IssueChange) bool {
 	return change.Title != nil || change.Body != nil || change.Milestone != nil || len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 || len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0
 }
 
-func changeSummary(change ghcli.IssueChange) string {
-	parts := []string{}
-	if change.Title != nil {
-		parts = append(parts, "title")
-	}
-	if change.Body != nil {
-		parts = append(parts, "body")
-	}
-	if len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 {
-		parts = append(parts, "labels")
-	}
-	if len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0 {
-		parts = append(parts, "assignees")
-	}
-	if change.Milestone != nil {
-		parts = append(parts, "milestone")
-	}
-	if change.StateTransition != nil || change.StateReason != nil {
-		parts = append(parts, "state")
-	}
-	return strings.Join(parts, ", ")
-}
-
-func pullChangeLines(oldIssue, newIssue issue.Issue) []string {
+func (a *App) formatChangeLines(oldIssue, newIssue issue.Issue, labelColors map[string]string) []string {
 	oldIssue = issue.Normalize(oldIssue)
 	newIssue = issue.Normalize(newIssue)
+	t := a.Theme
 
 	lines := []string{}
 	if oldIssue.Title != newIssue.Title {
-		lines = append(lines, fmt.Sprintf("title: %q -> %q", oldIssue.Title, newIssue.Title))
+		lines = append(lines, t.FormatChange("title", fmt.Sprintf("%q", oldIssue.Title), fmt.Sprintf("%q", newIssue.Title)))
 	}
 	if oldIssue.Body != newIssue.Body {
-		lines = append(lines, fmt.Sprintf("body: %s -> %s", formatBodySummary(oldIssue.Body), formatBodySummary(newIssue.Body)))
+		lines = append(lines, t.FormatChange("body", formatBodySummary(oldIssue.Body), formatBodySummary(newIssue.Body)))
 	}
 	if !stringSlicesEqual(oldIssue.Labels, newIssue.Labels) {
-		lines = append(lines, fmt.Sprintf("labels: %s -> %s", formatStringList(oldIssue.Labels), formatStringList(newIssue.Labels)))
+		oldLabels := labelsToTheme(oldIssue.Labels, labelColors)
+		newLabels := labelsToTheme(newIssue.Labels, labelColors)
+		added, removed := diffLabelColors(oldLabels, newLabels)
+		if len(added) > 0 || len(removed) > 0 {
+			lines = append(lines, "    "+t.Styler().Fg(t.FieldName, "labels: ")+t.FormatLabelChange(added, removed))
+		}
 	}
 	if !stringSlicesEqual(oldIssue.Assignees, newIssue.Assignees) {
-		lines = append(lines, fmt.Sprintf("assignees: %s -> %s", formatStringList(oldIssue.Assignees), formatStringList(newIssue.Assignees)))
+		lines = append(lines, t.FormatChange("assignees", formatStringList(oldIssue.Assignees), formatStringList(newIssue.Assignees)))
 	}
 	if oldIssue.Milestone != newIssue.Milestone {
-		lines = append(lines, fmt.Sprintf("milestone: %s -> %s", formatOptionalString(oldIssue.Milestone), formatOptionalString(newIssue.Milestone)))
+		lines = append(lines, t.FormatChange("milestone", formatOptionalString(oldIssue.Milestone), formatOptionalString(newIssue.Milestone)))
 	}
 	if oldIssue.State != newIssue.State {
-		lines = append(lines, fmt.Sprintf("state: %s -> %s", formatOptionalString(oldIssue.State), formatOptionalString(newIssue.State)))
+		lines = append(lines, t.FormatChange("state", formatOptionalString(oldIssue.State), formatOptionalString(newIssue.State)))
 	}
 	if normalizeOptional(oldIssue.StateReason) != normalizeOptional(newIssue.StateReason) {
-		lines = append(lines, fmt.Sprintf("state_reason: %s -> %s", formatOptionalStringPtr(oldIssue.StateReason), formatOptionalStringPtr(newIssue.StateReason)))
+		lines = append(lines, t.FormatChange("state_reason", formatOptionalStringPtr(oldIssue.StateReason), formatOptionalStringPtr(newIssue.StateReason)))
 	}
 	return lines
+}
+
+func labelsToTheme(labels []string, colors map[string]string) []theme.LabelColor {
+	result := make([]theme.LabelColor, 0, len(labels))
+	for _, name := range labels {
+		color := colors[name]
+		if color == "" {
+			color = "6b7280" // default gray if no color
+		}
+		result = append(result, theme.LabelColor{Name: name, Color: color})
+	}
+	return result
+}
+
+func diffLabelColors(old, new []theme.LabelColor) (added, removed []theme.LabelColor) {
+	oldSet := make(map[string]theme.LabelColor)
+	for _, l := range old {
+		oldSet[l.Name] = l
+	}
+	newSet := make(map[string]theme.LabelColor)
+	for _, l := range new {
+		newSet[l.Name] = l
+	}
+	for _, l := range new {
+		if _, ok := oldSet[l.Name]; !ok {
+			added = append(added, l)
+		}
+	}
+	for _, l := range old {
+		if _, ok := newSet[l.Name]; !ok {
+			removed = append(removed, l)
+		}
+	}
+	return
 }
 
 func formatBodySummary(body string) string {
