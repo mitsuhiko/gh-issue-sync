@@ -434,6 +434,11 @@ func (a *App) printIssueLine(item IssueFile, labelColors map[string]string, pend
 		line += "  " + assigneeDisplay
 	}
 
+	// Truncate to terminal width to avoid wrapping
+	if width := getTerminalWidth(a.Out); width > 0 {
+		line = truncateAnsi(line, width, t.Styler().Reset())
+	}
+
 	fmt.Fprintln(a.Out, line)
 }
 

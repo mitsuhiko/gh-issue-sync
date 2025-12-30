@@ -2,10 +2,14 @@ package app
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/mitsuhiko/gh-issue-sync/internal/issue"
 	"github.com/mitsuhiko/gh-issue-sync/internal/theme"
 )
@@ -207,4 +211,61 @@ func padRight(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-visible)
+}
+
+// truncateAnsi truncates a string with ANSI codes to fit within max visible characters.
+// It appends a reset sequence if the string was truncated mid-styling.
+func truncateAnsi(s string, max int, reset string) string {
+	if max <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	visible := 0
+	for i := 0; i < len(s); {
+		// Handle ANSI escape sequences
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && s[j] != 'm' {
+				j++
+			}
+			if j < len(s) {
+				j++
+			}
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		// Handle regular runes
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			size = 1
+		}
+		if visible+1 > max {
+			if reset != "" {
+				b.WriteString(reset)
+			}
+			return b.String()
+		}
+		b.WriteRune(r)
+		visible++
+		i += size
+	}
+	return b.String()
+}
+
+// getTerminalWidth returns the terminal width for the given writer, or 0 if not a terminal.
+// Subtracts 1 to avoid wrapping issues on the last column.
+func getTerminalWidth(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return 0
+	}
+	if !term.IsTerminal(f.Fd()) {
+		return 0
+	}
+	width, _, err := term.GetSize(f.Fd())
+	if err != nil || width <= 0 {
+		return 0
+	}
+	return width - 1 // Reserve last column to avoid wrapping
 }
