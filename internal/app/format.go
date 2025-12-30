@@ -17,10 +17,13 @@ func (a *App) formatChangeLines(oldIssue, newIssue issue.Issue, labelColors map[
 
 	lines := []string{}
 	if oldIssue.Title != newIssue.Title {
-		lines = append(lines, t.FormatChange("title", fmt.Sprintf("%q", oldIssue.Title), fmt.Sprintf("%q", newIssue.Title)))
+		// Use inline word diff for title
+		titleDiff := a.formatInlineWordDiff(oldIssue.Title, newIssue.Title)
+		lines = append(lines, "    "+t.Styler().Fg(t.FieldName, "title: ")+titleDiff)
 	}
 	if oldIssue.Body != newIssue.Body {
-		lines = append(lines, t.FormatChange("body", formatBodySummary(oldIssue.Body), formatBodySummary(newIssue.Body)))
+		// Show body change as a simple info line, not as old->new since it's just a summary
+		lines = append(lines, "    "+t.Styler().Fg(t.FieldName, "body: ")+t.MutedText(fmt.Sprintf("changed (%s -> %s)", formatBodySummary(oldIssue.Body), formatBodySummary(newIssue.Body))))
 	}
 	if !stringSlicesEqual(oldIssue.Labels, newIssue.Labels) {
 		oldLabels := labelsToTheme(oldIssue.Labels, labelColors)
@@ -34,10 +37,26 @@ func (a *App) formatChangeLines(oldIssue, newIssue issue.Issue, labelColors map[
 		lines = append(lines, t.FormatChange("assignees", formatStringList(oldIssue.Assignees), formatStringList(newIssue.Assignees)))
 	}
 	if oldIssue.Milestone != newIssue.Milestone {
-		lines = append(lines, t.FormatChange("milestone", formatOptionalString(oldIssue.Milestone), formatOptionalString(newIssue.Milestone)))
+		// Use inline word diff for milestone
+		if oldIssue.Milestone == "" {
+			lines = append(lines, t.FormatChange("milestone", "<none>", fmt.Sprintf("%q", newIssue.Milestone)))
+		} else if newIssue.Milestone == "" {
+			lines = append(lines, t.FormatChange("milestone", fmt.Sprintf("%q", oldIssue.Milestone), "<none>"))
+		} else {
+			milestoneDiff := a.formatInlineWordDiff(oldIssue.Milestone, newIssue.Milestone)
+			lines = append(lines, "    "+t.Styler().Fg(t.FieldName, "milestone: ")+milestoneDiff)
+		}
 	}
 	if oldIssue.IssueType != newIssue.IssueType {
-		lines = append(lines, t.FormatChange("type", formatOptionalString(oldIssue.IssueType), formatOptionalString(newIssue.IssueType)))
+		// Use inline word diff for issue type
+		if oldIssue.IssueType == "" {
+			lines = append(lines, t.FormatChange("type", "<none>", fmt.Sprintf("%q", newIssue.IssueType)))
+		} else if newIssue.IssueType == "" {
+			lines = append(lines, t.FormatChange("type", fmt.Sprintf("%q", oldIssue.IssueType), "<none>"))
+		} else {
+			typeDiff := a.formatInlineWordDiff(oldIssue.IssueType, newIssue.IssueType)
+			lines = append(lines, "    "+t.Styler().Fg(t.FieldName, "type: ")+typeDiff)
+		}
 	}
 	if !stringSlicesEqual(oldIssue.Projects, newIssue.Projects) {
 		lines = append(lines, t.FormatChange("projects", formatStringList(oldIssue.Projects), formatStringList(newIssue.Projects)))

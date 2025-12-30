@@ -33,56 +33,72 @@ func (a *App) Status(ctx context.Context) error {
 		fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Last full pull:"), t.WarningText("never"))
 	}
 
+	// Load label cache for colored output
+	labelCache, _ := loadLabelCache(p)
+	labelColors := labelCacheToColorMap(labelCache)
+
 	result := loadLocalIssuesWithErrors(p)
 	for _, parseErr := range result.Errors {
 		fmt.Fprintf(a.Err, "%s %v\n", t.WarningText("Warning:"), parseErr)
 	}
 	localIssues := result.Issues
-	var modified []string
-	var newLocal []string
-	var stateChanges []string
+
+	type modifiedIssue struct {
+		item     IssueFile
+		original issue.Issue
+	}
+
+	var modified []modifiedIssue
+	var newLocal []IssueFile
 
 	for _, item := range localIssues {
 		if item.Issue.Number.IsLocal() {
-			newLocal = append(newLocal, item.Path)
+			newLocal = append(newLocal, item)
 			continue
 		}
 		original, hasOriginal := readOriginalIssue(p, item.Issue.Number.String())
 		if !hasOriginal {
-			modified = append(modified, item.Path)
+			// No original means we can't compare - treat as modified without baseline
+			modified = append(modified, modifiedIssue{item: item, original: issue.Issue{}})
 			continue
 		}
 		if !issue.EqualIgnoringSyncedAt(item.Issue, original) {
-			modified = append(modified, item.Path)
-		}
-		if item.Issue.State != original.State {
-			stateChanges = append(stateChanges, item.Path)
+			modified = append(modified, modifiedIssue{item: item, original: original})
 		}
 	}
 
+	// Sort by issue number
+	sort.Slice(modified, func(i, j int) bool {
+		return modified[i].item.Issue.Number.String() < modified[j].item.Issue.Number.String()
+	})
+	sort.Slice(newLocal, func(i, j int) bool {
+		return newLocal[i].Issue.Number.String() < newLocal[j].Issue.Number.String()
+	})
+
+	// Display modified issues in push/pull format
 	if len(modified) > 0 {
-		sort.Strings(modified)
 		fmt.Fprintln(a.Out)
 		fmt.Fprintln(a.Out, t.Bold("Modified locally:"))
-		for _, path := range modified {
-			fmt.Fprintf(a.Out, "  %s %s\n", t.FormatStatus("M"), relPath(a.Root, path))
+		for _, m := range modified {
+			fmt.Fprintln(a.Out, t.FormatIssueHeader("M", m.item.Issue.Number.String(), m.item.Issue.Title))
+			for _, line := range a.formatChangeLines(m.original, m.item.Issue, labelColors) {
+				fmt.Fprintln(a.Out, line)
+			}
 		}
 	}
+
+	// Display new local issues
 	if len(newLocal) > 0 {
-		sort.Strings(newLocal)
 		fmt.Fprintln(a.Out)
 		fmt.Fprintln(a.Out, t.Bold("New local issues:"))
-		for _, path := range newLocal {
-			fmt.Fprintf(a.Out, "  %s %s\n", t.FormatStatus("A"), relPath(a.Root, path))
+		for _, item := range newLocal {
+			fmt.Fprintln(a.Out, t.FormatIssueHeader("A", item.Issue.Number.String(), item.Issue.Title))
 		}
 	}
-	if len(stateChanges) > 0 {
-		sort.Strings(stateChanges)
-		fmt.Fprintln(a.Out)
-		fmt.Fprintln(a.Out, t.Bold("State changes:"))
-		for _, path := range stateChanges {
-			fmt.Fprintf(a.Out, "  %s %s\n", t.AccentText("->"), relPath(a.Root, path))
-		}
+
+	// Summary
+	if len(modified) == 0 && len(newLocal) == 0 {
+		fmt.Fprintf(a.Out, "\n%s\n", t.MutedText("No local changes"))
 	}
 
 	// Check if projects are used and warn about missing scope
@@ -628,6 +644,10 @@ func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
 	}
 	t := a.Theme
 
+	// Load label cache for colored output
+	labelCache, _ := loadLabelCache(p)
+	labelColors := labelCacheToColorMap(labelCache)
+
 	file, err := findIssueByNumber(p, number)
 	if err != nil {
 		return err
@@ -670,43 +690,22 @@ func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
 		return nil
 	}
 
-	// Print header
-	fmt.Fprintf(a.Out, "%s %s %s\n\n",
-		t.Bold("Diff for"),
-		t.AccentText("#"+local.Number.String()),
-		t.MutedText(fmt.Sprintf("(local vs %s)", baseLabel)))
+	// Print header in same format as push/pull
+	fmt.Fprintln(a.Out, t.FormatIssueHeader("M", local.Number.String(), local.Title))
 
-	// Diff metadata fields
-	if base.Title != local.Title {
-		fmt.Fprintln(a.Out, t.FormatChange("title", fmt.Sprintf("%q", base.Title), fmt.Sprintf("%q", local.Title)))
-	}
-	if base.State != local.State {
-		fmt.Fprintln(a.Out, t.FormatChange("state", base.State, local.State))
-	}
-	if normalizeOptional(base.StateReason) != normalizeOptional(local.StateReason) {
-		fmt.Fprintln(a.Out, t.FormatChange("state_reason", formatOptionalStringPtr(base.StateReason), formatOptionalStringPtr(local.StateReason)))
-	}
-	if !stringSlicesEqual(base.Labels, local.Labels) {
-		fmt.Fprintln(a.Out, t.FormatChange("labels", formatStringList(base.Labels), formatStringList(local.Labels)))
-	}
-	if !stringSlicesEqual(base.Assignees, local.Assignees) {
-		fmt.Fprintln(a.Out, t.FormatChange("assignees", formatStringList(base.Assignees), formatStringList(local.Assignees)))
-	}
-	if base.Milestone != local.Milestone {
-		fmt.Fprintln(a.Out, t.FormatChange("milestone", formatOptionalString(base.Milestone), formatOptionalString(local.Milestone)))
-	}
-	if base.IssueType != local.IssueType {
-		fmt.Fprintln(a.Out, t.FormatChange("type", formatOptionalString(base.IssueType), formatOptionalString(local.IssueType)))
-	}
-	if !stringSlicesEqual(base.Projects, local.Projects) {
-		fmt.Fprintln(a.Out, t.FormatChange("projects", formatStringList(base.Projects), formatStringList(local.Projects)))
+	// Print metadata changes using formatChangeLines (same as push/pull)
+	for _, line := range a.formatChangeLines(base, local, labelColors) {
+		fmt.Fprintln(a.Out, line)
 	}
 
-	// Diff body with unified diff format
+	// Show word diff for body if changed
 	if base.Body != local.Body {
 		fmt.Fprintln(a.Out)
-		fmt.Fprintln(a.Out, t.Bold("Body:"))
-		a.printUnifiedDiff(base.Body, local.Body, baseLabel, "local")
+		fmt.Fprintf(a.Out, "    %s\n", t.Styler().Fg(t.FieldName, "body:"))
+		hasWhitespaceChanges := a.printWordDiff(base.Body, local.Body)
+		if hasWhitespaceChanges {
+			fmt.Fprintf(a.Out, "\n    %s\n", t.MutedText("(note: whitespace also changed)"))
+		}
 	}
 
 	return nil
