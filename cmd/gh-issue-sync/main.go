@@ -125,7 +125,9 @@ type DiffCommand struct {
 }
 
 type WriteSkillCommand struct {
-	Output string `long:"output" short:"o" value-name:"DIR" description:"Output directory (default: ~/.codex/skills/gh-issue-sync/)"`
+	Output string `long:"output" short:"o" value-name:"DIR" description:"Output directory (overrides --agent)"`
+	Agent  string `long:"agent" short:"a" value-name:"AGENT" description:"Target agent (codex, pi, claude, amp, opencode, generic)"`
+	Scope  string `long:"scope" short:"s" value-name:"SCOPE" default:"user" description:"Scope: user (home dir) or project (current dir)"`
 }
 
 func (c *InitCommand) Usage() string {
@@ -290,11 +292,54 @@ func (c *DiffCommand) Execute(args []string) error {
 func (c *WriteSkillCommand) Execute(args []string) error {
 	outputDir := c.Output
 	if outputDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
+		if c.Agent == "" {
+			return fmt.Errorf("either --agent or --output is required")
 		}
-		outputDir = filepath.Join(home, ".codex", "skills", "gh-issue-sync")
+		if c.Scope != "user" && c.Scope != "project" {
+			return fmt.Errorf("scope must be 'user' or 'project'")
+		}
+
+		var baseDir string
+		if c.Scope == "user" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("cannot determine home directory: %w", err)
+			}
+			baseDir = home
+		} else {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("cannot determine current directory: %w", err)
+			}
+			baseDir = cwd
+		}
+
+		var agentDir string
+		skillSubdir := "skills"
+		switch c.Agent {
+		case "codex":
+			agentDir = ".codex"
+		case "pi":
+			agentDir = ".pi"
+		case "claude":
+			agentDir = ".claude"
+		case "opencode":
+			if c.Scope == "user" {
+				agentDir = filepath.Join(".config", "opencode")
+			} else {
+				agentDir = ".opencode"
+			}
+			skillSubdir = "skill"
+		case "amp", "generic":
+			if c.Scope == "user" {
+				agentDir = filepath.Join(".config", "agents")
+			} else {
+				agentDir = ".agents"
+			}
+		default:
+			return fmt.Errorf("unknown agent: %s", c.Agent)
+		}
+		outputDir = filepath.Join(baseDir, agentDir, skillSubdir, "gh-issue-sync")
 	}
 
 	skillPath := filepath.Join(outputDir, "SKILL.md")
