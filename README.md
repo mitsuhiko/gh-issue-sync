@@ -1,4 +1,7 @@
-# gh-issue-sync
+<div align="center">
+  <img src="logo.svg" alt="" width=320>
+  <p><strong>gh-issue-sync: sync GitHub issues locally and back</strong></p>
+</div>
 
 `gh-issue-sync` is a simple command line tool that can sync GitHub issues to
 local Markdown files for offline editing, batch updates, and seamless
