@@ -636,6 +636,93 @@ func renderMarkdown(text string) (string, error) {
 	return renderer.Render(text)
 }
 
+func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
+	p := paths.New(a.Root)
+	cfg, err := loadConfig(p.ConfigPath)
+	if err != nil {
+		return err
+	}
+	t := a.Theme
+
+	// Load label cache for colored output
+	labelCache, _ := loadLabelCache(p)
+	labelColors := labelCacheToColorMap(labelCache)
+
+	// Load all local issues
+	files, err := loadLocalIssues(p)
+	if err != nil {
+		return err
+	}
+
+	if len(files) == 0 {
+		fmt.Fprintln(a.Out, t.MutedText("No local issues found"))
+		return nil
+	}
+
+	var client *ghcli.Client
+	if opts.Remote {
+		client = ghcli.NewClient(a.Runner, repoSlug(cfg))
+	}
+
+	count := 0
+	for _, file := range files {
+		local := issue.Normalize(file.Issue)
+
+		var base issue.Issue
+		if opts.Remote {
+			if local.Number.IsLocal() {
+				continue // skip local-only issues for remote diff
+			}
+			remote, err := client.GetIssue(ctx, local.Number.String())
+			if err != nil {
+				fmt.Fprintf(a.Out, "%s %s: %v\n", t.ErrorText("!"), local.Number, err)
+				continue
+			}
+			base = issue.Normalize(remote)
+		} else {
+			original, hasOriginal := readOriginalIssue(p, local.Number.String())
+			if !hasOriginal {
+				continue // skip issues without original
+			}
+			base = issue.Normalize(original)
+		}
+
+		if issue.EqualIgnoringSyncedAt(base, local) {
+			continue // no differences
+		}
+
+		if count > 0 {
+			fmt.Fprintln(a.Out)
+		}
+		count++
+
+		// Print header
+		fmt.Fprintln(a.Out, t.FormatIssueHeader("M", local.Number.String(), local.Title))
+
+		// Print metadata changes
+		for _, line := range a.formatChangeLines(base, local, labelColors) {
+			fmt.Fprintln(a.Out, line)
+		}
+
+		// Show word diff for body if changed
+		if base.Body != local.Body {
+			fmt.Fprintln(a.Out)
+			fmt.Fprintf(a.Out, "    %s\n", t.Styler().Fg(t.FieldName, "body:"))
+			a.printWordDiff(base.Body, local.Body)
+		}
+	}
+
+	if count == 0 {
+		baseLabel := "original"
+		if opts.Remote {
+			baseLabel = "remote"
+		}
+		fmt.Fprintln(a.Out, t.MutedText(fmt.Sprintf("No differences between local and %s", baseLabel)))
+	}
+
+	return nil
+}
+
 func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
 	p := paths.New(a.Root)
 	cfg, err := loadConfig(p.ConfigPath)

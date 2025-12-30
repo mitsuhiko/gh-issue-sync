@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // printWordDiff prints a colorized word-level diff that ignores whitespace differences.
@@ -29,6 +30,9 @@ func (a *App) printWordDiff(oldText, newText string) bool {
 
 	// Compute word-level diff
 	ops := computeWordDiff(oldWords, newWords)
+
+	// Refine adjacent delete+insert pairs into character-level diffs
+	ops = refineWordDiff(ops)
 
 	// Render the diff
 	a.renderWordDiff(ops)
@@ -87,6 +91,198 @@ func splitIntoWords(text string) []string {
 		words = append(words, current.String())
 	}
 	return words
+}
+
+// refineWordDiff looks for adjacent delete+insert pairs and refines them
+// into character-level diffs if the words are similar enough.
+func refineWordDiff(ops []diffOp) []diffOp {
+	var result []diffOp
+	i := 0
+	for i < len(ops) {
+		// Look for delete followed by insert (or vice versa)
+		if i+1 < len(ops) {
+			op1, op2 := ops[i], ops[i+1]
+			var oldWord, newWord string
+
+			if op1.Type == diffDelete && op2.Type == diffInsert {
+				oldWord, newWord = op1.Text, op2.Text
+			} else if op1.Type == diffInsert && op2.Type == diffDelete {
+				oldWord, newWord = op2.Text, op1.Text
+			}
+
+			if oldWord != "" && newWord != "" && wordsSimilar(oldWord, newWord) {
+				// Refine into character-level diff
+				charOps := computeCharDiff(oldWord, newWord)
+				result = append(result, diffOp{
+					Type:    diffChange,
+					Text:    oldWord,
+					NewText: newWord,
+					CharOps: charOps,
+				})
+				i += 2
+				continue
+			}
+		}
+		result = append(result, ops[i])
+		i++
+	}
+	return result
+}
+
+// wordsSimilar returns true if two words are similar enough to warrant
+// character-level diffing. We use a simple heuristic: common prefix+suffix
+// must cover at least 50% of the longer word, OR Levenshtein distance
+// must be less than 50% of the longer word's length.
+func wordsSimilar(a, b string) bool {
+	if a == b {
+		return true
+	}
+
+	// Convert to runes for proper unicode handling
+	ar := []rune(a)
+	br := []rune(b)
+
+	maxLen := len(ar)
+	if len(br) > maxLen {
+		maxLen = len(br)
+	}
+	if maxLen == 0 {
+		return true
+	}
+
+	// Check common prefix
+	prefix := 0
+	for prefix < len(ar) && prefix < len(br) && ar[prefix] == br[prefix] {
+		prefix++
+	}
+
+	// Check common suffix (but don't overlap with prefix)
+	suffix := 0
+	for suffix < len(ar)-prefix && suffix < len(br)-prefix &&
+		ar[len(ar)-1-suffix] == br[len(br)-1-suffix] {
+		suffix++
+	}
+
+	// If common parts cover at least 40% of the longer word, consider similar
+	commonRatio := float64(prefix+suffix) / float64(maxLen)
+	if commonRatio >= 0.4 {
+		return true
+	}
+
+	// Fall back to Levenshtein distance for cases like "color" -> "colour"
+	dist := levenshteinRunes(ar, br)
+	distRatio := float64(dist) / float64(maxLen)
+	return distRatio <= 0.5
+}
+
+// levenshteinRunes computes the Levenshtein distance between two rune slices.
+func levenshteinRunes(a, b []rune) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+
+	// Use two rows for space efficiency
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(
+				prev[j]+1,      // deletion
+				curr[j-1]+1,    // insertion
+				prev[j-1]+cost, // substitution
+			)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
+// computeCharDiff computes character-level diff between two strings using LCS.
+func computeCharDiff(oldText, newText string) []diffOp {
+	oldRunes := []rune(oldText)
+	newRunes := []rune(newText)
+	m, n := len(oldRunes), len(newRunes)
+
+	if m == 0 && n == 0 {
+		return nil
+	}
+
+	// Build LCS table
+	lcs := make([][]int, m+1)
+	for i := range lcs {
+		lcs[i] = make([]int, n+1)
+	}
+
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if oldRunes[i-1] == newRunes[j-1] {
+				lcs[i][j] = lcs[i-1][j-1] + 1
+			} else if lcs[i-1][j] >= lcs[i][j-1] {
+				lcs[i][j] = lcs[i-1][j]
+			} else {
+				lcs[i][j] = lcs[i][j-1]
+			}
+		}
+	}
+
+	// Backtrack to build diff
+	var ops []diffOp
+	i, j := m, n
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && oldRunes[i-1] == newRunes[j-1] {
+			ops = append(ops, diffOp{Type: diffEqual, Text: string(oldRunes[i-1])})
+			i--
+			j--
+		} else if j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]) {
+			ops = append(ops, diffOp{Type: diffInsert, Text: string(newRunes[j-1])})
+			j--
+		} else {
+			ops = append(ops, diffOp{Type: diffDelete, Text: string(oldRunes[i-1])})
+			i--
+		}
+	}
+
+	// Reverse to get correct order
+	for left, right := 0, len(ops)-1; left < right; left, right = left+1, right-1 {
+		ops[left], ops[right] = ops[right], ops[left]
+	}
+
+	// Merge consecutive ops of the same type for cleaner output
+	return mergeConsecutiveOps(ops)
+}
+
+// mergeConsecutiveOps merges consecutive diff operations of the same type.
+func mergeConsecutiveOps(ops []diffOp) []diffOp {
+	if len(ops) == 0 {
+		return ops
+	}
+
+	var result []diffOp
+	current := ops[0]
+
+	for i := 1; i < len(ops); i++ {
+		if ops[i].Type == current.Type {
+			current.Text += ops[i].Text
+		} else {
+			result = append(result, current)
+			current = ops[i]
+		}
+	}
+	result = append(result, current)
+	return result
 }
 
 // computeWordDiff computes word-level diff using LCS algorithm
@@ -156,7 +352,7 @@ func (a *App) renderWordDiff(ops []diffOp) {
 	}
 
 	addWord := func(word, styled string) {
-		wordLen := len(word)
+		wordLen := utf8.RuneCountInString(word)
 		if lineLen > 0 && lineLen+1+wordLen > maxLineLen {
 			flushLine()
 		}
@@ -178,19 +374,48 @@ func (a *App) renderWordDiff(ops []diffOp) {
 		case diffInsert:
 			styled := t.Styler().FgUnderline(t.NewValue, op.Text)
 			addWord(op.Text, styled)
+		case diffChange:
+			// Render character-level diff inline
+			styled := a.renderCharDiff(op.CharOps)
+			// Use the longer of old/new for line length calculation
+			wordLen := utf8.RuneCountInString(op.Text)
+			if newLen := utf8.RuneCountInString(op.NewText); newLen > wordLen {
+				wordLen = newLen
+			}
+			addWord(string(make([]rune, wordLen)), styled)
 		}
 	}
 	flushLine()
 }
 
+// renderCharDiff renders character-level diff operations as a single styled string.
+func (a *App) renderCharDiff(ops []diffOp) string {
+	t := a.Theme
+	var result strings.Builder
+
+	for _, op := range ops {
+		switch op.Type {
+		case diffEqual:
+			result.WriteString(op.Text)
+		case diffDelete:
+			result.WriteString(t.Styler().FgStrikethrough(t.OldValue, op.Text))
+		case diffInsert:
+			result.WriteString(t.Styler().FgUnderline(t.NewValue, op.Text))
+		}
+	}
+	return result.String()
+}
+
 // formatInlineWordDiff returns an inline word diff string for short text like titles.
 // It shows deleted words with strikethrough and added words with underline.
+// Similar words are refined to show character-level changes.
 func (a *App) formatInlineWordDiff(oldText, newText string) string {
 	t := a.Theme
 
 	oldWords := splitIntoWords(oldText)
 	newWords := splitIntoWords(newText)
 	ops := computeWordDiff(oldWords, newWords)
+	ops = refineWordDiff(ops)
 
 	var result strings.Builder
 	for i, op := range ops {
@@ -204,6 +429,8 @@ func (a *App) formatInlineWordDiff(oldText, newText string) string {
 			result.WriteString(t.Styler().FgStrikethrough(t.OldValue, op.Text))
 		case diffInsert:
 			result.WriteString(t.Styler().FgUnderline(t.NewValue, op.Text))
+		case diffChange:
+			result.WriteString(a.renderCharDiff(op.CharOps))
 		}
 	}
 	return result.String()
@@ -215,9 +442,12 @@ const (
 	diffEqual diffOpType = iota
 	diffDelete
 	diffInsert
+	diffChange // A word that changed - has character-level diff in CharOps
 )
 
 type diffOp struct {
-	Type diffOpType
-	Text string
+	Type    diffOpType
+	Text    string    // The text (or old text for diffChange)
+	NewText string    // Only used for diffChange - the new text
+	CharOps []diffOp  // Only used for diffChange - character-level operations
 }

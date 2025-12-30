@@ -120,7 +120,7 @@ type DiffCommand struct {
 	BaseCommand
 	Remote bool `long:"remote" description:"Diff against current remote state instead of last synced original"`
 	Args   struct {
-		Number string `positional-arg-name:"issue" description:"Issue number or local ID" required:"yes"`
+		Number string `positional-arg-name:"issue" description:"Issue number or local ID (omit to diff all)"`
 	} `positional-args:"yes"`
 }
 
@@ -282,7 +282,7 @@ func (c *DiffCommand) Execute(args []string) error {
 		number = args[0]
 	}
 	if strings.TrimSpace(number) == "" {
-		return fmt.Errorf("issue number is required")
+		return c.App.DiffAll(context.Background(), app.DiffOptions{Remote: c.Remote})
 	}
 	return c.App.Diff(context.Background(), number, app.DiffOptions{Remote: c.Remote})
 }

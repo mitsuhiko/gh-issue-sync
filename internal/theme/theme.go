@@ -59,8 +59,8 @@ func Default() *Theme {
 
 		// Diff display
 		FieldName:  termcolor.MustParseHex("#94a3b8"), // Slate gray
-		OldValue:   termcolor.MustParseHex("#f87171"), // Light red
-		NewValue:   termcolor.MustParseHex("#4ade80"), // Light green
+		OldValue:   termcolor.MustParseHex("#ff6b8a"), // Coral pink
+		NewValue:   termcolor.MustParseHex("#36d399"), // Mint teal
 		Arrow:      termcolor.MustParseHex("#64748b"), // Dim slate
 		StatusChar: termcolor.MustParseHex("#22d3ee"), // Cyan
 	}
