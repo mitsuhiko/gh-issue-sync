@@ -73,6 +73,34 @@ gh-issue-sync push
 gh-issue-sync sync
 ```
 
+## Directory Location
+
+When you run `gh-issue-sync init`, the `.issues` directory is created next to
+the `.git` directory (at the repository root), regardless of your current
+working directory.
+
+For other commands, `gh-issue-sync` searches for `.issues` by walking upward
+from the current directory until it finds one or reaches a `.git` root. This
+means you can run commands from any subdirectory within your project.
+
+### Environment Variable Override
+
+Set `GH_ISSUE_SYNC_DIR` to explicitly specify the `.issues` directory location:
+
+```bash
+# Use a custom location
+export GH_ISSUE_SYNC_DIR=/path/to/my-project/.issues
+gh-issue-sync list
+
+# Or inline
+GH_ISSUE_SYNC_DIR=~/.issues/work-project gh-issue-sync pull
+```
+
+This is useful when:
+- Working with multiple repositories
+- Storing issues outside the repository
+- Using a shared issues directory across projects
+
 ## Agent Skill
 
 This tool is designed to work with coding agents. Install the skill file so

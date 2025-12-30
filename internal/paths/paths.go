@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 )
 
+const EnvIssuesDir = "GH_ISSUE_SYNC_DIR"
+
 const (
 	IssuesDirName      = ".issues"
 	SyncDirName        = ".sync"
@@ -67,4 +69,62 @@ func (p Paths) EnsureLayout() error {
 		}
 	}
 	return nil
+}
+
+// FindIssuesDir searches for an existing .issues directory.
+// It first checks the GH_ISSUE_SYNC_DIR environment variable,
+// then walks upward from startDir until it finds .issues or hits a .git root.
+// Returns the directory containing .issues (not .issues itself), or empty string if not found.
+func FindIssuesDir(startDir string) string {
+	// Check environment variable first
+	if envDir := os.Getenv(EnvIssuesDir); envDir != "" {
+		if !filepath.IsAbs(envDir) {
+			envDir = filepath.Join(startDir, envDir)
+		}
+		// The env var points to the .issues directory itself
+		if info, err := os.Stat(envDir); err == nil && info.IsDir() {
+			return filepath.Dir(envDir)
+		}
+		return ""
+	}
+
+	// Walk upward looking for .issues
+	dir := startDir
+	for {
+		issuesPath := filepath.Join(dir, IssuesDirName)
+		if info, err := os.Stat(issuesPath); err == nil && info.IsDir() {
+			return dir
+		}
+
+		// Stop at git root
+		gitPath := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return ""
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Hit filesystem root
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// FindGitRoot walks upward from startDir to find the directory containing .git.
+// Returns empty string if not found.
+func FindGitRoot(startDir string) string {
+	dir := startDir
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

@@ -91,7 +91,13 @@ func (a *App) Init(ctx context.Context, owner, repo string) error {
 		}
 	}
 
-	p := paths.New(a.Root)
+	// Default to placing .issues next to .git
+	root := a.Root
+	if gitRoot := paths.FindGitRoot(root); gitRoot != "" {
+		root = gitRoot
+	}
+
+	p := paths.New(root)
 	if err := p.EnsureLayout(); err != nil {
 		return err
 	}
