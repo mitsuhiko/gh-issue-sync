@@ -101,7 +101,7 @@ func (p *progressReporter) Done() {
 	p.stopPulse()
 	p.mu.Lock()
 	if p.started {
-		fmt.Fprintln(p.out)
+		fmt.Fprint(p.out, "\r\x1b[K")
 	}
 	p.mu.Unlock()
 	p.restoreCursor()
