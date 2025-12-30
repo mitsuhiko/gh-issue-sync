@@ -80,6 +80,54 @@ gh-issue-sync push
 gh-issue-sync sync
 ```
 
+## Agent Skill
+
+This tool is designed to work with coding agents. Install the skill file so
+your agent knows how to use `gh-issue-sync`:
+
+```bash
+# For Claude Code / Codex
+gh-issue-sync write-skill --agent codex
+
+# For Pi (shittycodingagent.ai)
+gh-issue-sync write-skill --agent pi
+
+# For Claude Desktop
+gh-issue-sync write-skill --agent claude
+
+# For OpenCode
+gh-issue-sync write-skill --agent opencode
+
+# For Amp or other agents using ~/.config/agents/
+gh-issue-sync write-skill --agent generic
+```
+
+Use `--scope` to choose between user-level (default) or project-level installation:
+
+```bash
+# Install to user home directory (default)
+gh-issue-sync write-skill --agent codex --scope user
+
+# Install to current project directory
+gh-issue-sync write-skill --agent codex --scope project
+```
+
+| Agent | User Scope | Project Scope |
+|-------|------------|---------------|
+| `codex` | `~/.codex/skills/` | `.codex/skills/` |
+| `pi` | `~/.pi/skills/` | `.pi/skills/` |
+| `claude` | `~/.claude/skills/` | `.claude/skills/` |
+| `opencode` | `~/.config/opencode/skill/` | `.opencode/skill/` |
+| `amp`, `generic` | `~/.config/agents/skills/` | `.agents/skills/` |
+
+To install to a custom location:
+
+```bash
+gh-issue-sync write-skill --output /path/to/skills/gh-issue-sync/
+```
+
+You can also read or copy the skill file directly: [`skill/SKILL.md`](skill/SKILL.md)
+
 ## Creating Local Issues
 
 Since the issue numbers come from github you can use temporary issue numbers
@@ -255,51 +303,6 @@ When a conflict occurs:
 - On **pull**: Local changes are preserved, remote update is skipped
 - On **push**: Remote changes are detected, local push is skipped
 - Use `--force` on pull to overwrite local changes
-
-## Agent Skill
-
-`gh-issue-sync` includes a skill file for coding agents. Install it for your agent:
-
-```bash
-# For Claude Code / Codex
-gh-issue-sync write-skill --agent codex
-
-# For Pi (shittycodingagent.ai)
-gh-issue-sync write-skill --agent pi
-
-# For Claude Desktop
-gh-issue-sync write-skill --agent claude
-
-# For OpenCode
-gh-issue-sync write-skill --agent opencode
-
-# For Amp or other agents using ~/.config/agents/
-gh-issue-sync write-skill --agent generic
-```
-
-Use `--scope` to choose between user-level (default) or project-level installation:
-
-```bash
-# Install to user home directory (default)
-gh-issue-sync write-skill --agent codex --scope user
-
-# Install to current project directory
-gh-issue-sync write-skill --agent codex --scope project
-```
-
-| Agent | User Scope | Project Scope |
-|-------|------------|---------------|
-| `codex` | `~/.codex/skills/` | `.codex/skills/` |
-| `pi` | `~/.pi/skills/` | `.pi/skills/` |
-| `claude` | `~/.claude/skills/` | `.claude/skills/` |
-| `opencode` | `~/.config/opencode/skill/` | `.opencode/skill/` |
-| `amp`, `generic` | `~/.config/agents/skills/` | `.agents/skills/` |
-
-To install to a custom location:
-
-```bash
-gh-issue-sync write-skill --output /path/to/skills/gh-issue-sync/
-```
 
 ## License
 
