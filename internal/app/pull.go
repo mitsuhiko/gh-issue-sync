@@ -43,14 +43,36 @@ func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
 	var labelColors map[string]string
 
 	if len(args) > 0 {
-		// Fetch specific issues by number
+		// Resolve args: can be issue numbers, local IDs, or paths
 		labelColors = a.fetchLabelColors(ctx, client)
 
+		// First, try to match args against local issues (for paths and local IDs)
+		var remoteNumbers []string
+		matched, _ := filterIssuesByArgs(a.Root, localIssues, args)
+		matchedArgs := make(map[string]struct{})
+		for _, item := range matched {
+			if !item.Issue.Number.IsLocal() {
+				remoteNumbers = append(remoteNumbers, item.Issue.Number.String())
+			}
+			matchedArgs[item.Issue.Number.String()] = struct{}{}
+		}
+		// Also include any args that look like remote issue numbers but weren't matched locally
 		for _, arg := range args {
-			number := strings.TrimSpace(arg)
-			if number == "" {
+			arg = strings.TrimSpace(arg)
+			if arg == "" {
 				continue
 			}
+			// Skip paths (they should have been matched above or don't exist)
+			if strings.HasSuffix(arg, ".md") || strings.Contains(arg, string(os.PathSeparator)) {
+				continue
+			}
+			// If not already matched as a local issue, treat as remote number
+			if _, ok := matchedArgs[arg]; !ok {
+				remoteNumbers = append(remoteNumbers, arg)
+			}
+		}
+
+		for _, number := range remoteNumbers {
 			remote, err := client.GetIssue(ctx, number)
 			if err != nil {
 				return err

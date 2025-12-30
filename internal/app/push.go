@@ -337,7 +337,12 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			conflicts = append(conflicts, item.Issue.Number.String())
 			continue
 		}
-		change := diffIssue(original, item.Issue)
+		// Use remote as baseline if no original exists (for state transitions)
+		baseline := original
+		if !hasOriginal {
+			baseline = remote
+		}
+		change := diffIssue(baseline, item.Issue)
 		if change.StateTransition != nil {
 			if *change.StateTransition == "close" {
 				reason := ""
