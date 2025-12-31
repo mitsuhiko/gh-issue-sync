@@ -1,7 +1,10 @@
 .PHONY: build test format install
 
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
+LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
+
 build:
-	go build -o gh-issue-sync ./cmd/gh-issue-sync
+	go build $(LDFLAGS) -o gh-issue-sync ./cmd/gh-issue-sync
 
 test:
 	go test ./...

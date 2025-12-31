@@ -14,7 +14,10 @@ import (
 	"github.com/mitsuhiko/gh-issue-sync/skill"
 )
 
+var version = "dev"
+
 type Options struct {
+	Version    bool              `long:"version" short:"v" description:"Show version"`
 	Init       InitCommand       `command:"init" description:"Initialize issue sync" long-description:"Create the .issues layout and config. If --owner/--repo are omitted, the git remote is used."`
 	Pull       PullCommand       `command:"pull" description:"Pull issues from GitHub" long-description:"Fetch issues from GitHub and write/update local issue files."`
 	Push       PushCommand       `command:"push" description:"Push local changes to GitHub" long-description:"Create or update GitHub issues based on local changes."`
@@ -406,6 +409,14 @@ func main() {
 	if len(os.Args) == 1 {
 		parser.WriteHelp(os.Stdout)
 		return
+	}
+
+	// Handle --version before parsing (go-flags doesn't support version flag natively)
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "--version" {
+			fmt.Println(version)
+			return
+		}
 	}
 
 	if _, err := parser.Parse(); err != nil {
