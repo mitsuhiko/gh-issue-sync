@@ -305,9 +305,19 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		}
 	}
 
-	var conflicts []string
+	// Phase 1: Identify issues that need updating (local check only, no API calls)
+	type pendingUpdate struct {
+		Index       int
+		Item        *IssueFile
+		Original    issue.Issue
+		HasOriginal bool
+	}
+	var pendingUpdates []pendingUpdate
+	var issueNumbersToFetch []string
 	unchanged := 0
-	for _, item := range filteredIssues {
+
+	for i := range filteredIssues {
+		item := &filteredIssues[i]
 		if item.Issue.Number.IsLocal() {
 			continue
 		}
@@ -323,94 +333,173 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 			fmt.Fprintf(a.Out, "%s %s\n", t.MutedText("Would push issue"), t.AccentText("#"+item.Issue.Number.String()))
 			continue
 		}
-		remote, err := client.GetIssue(ctx, item.Issue.Number.String())
+		pendingUpdates = append(pendingUpdates, pendingUpdate{
+			Index:       i,
+			Item:        item,
+			Original:    original,
+			HasOriginal: hasOriginal,
+		})
+		issueNumbersToFetch = append(issueNumbersToFetch, item.Issue.Number.String())
+	}
+
+	// Phase 2: Batch fetch remote issues for conflict detection (one API call)
+	var remoteIssues map[string]issue.Issue
+	if len(issueNumbersToFetch) > 0 {
+		var err error
+		remoteIssues, err = client.GetIssuesBatch(ctx, issueNumbersToFetch)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to fetch remote issues: %w", err)
 		}
-		// Enrich with relationships for accurate conflict check
-		if err := client.EnrichWithRelationships(ctx, &remote); err != nil {
-			// Log but don't fail
-			fmt.Fprintf(a.Err, "%s fetching relationships for #%s: %v\n",
-				t.WarningText("Warning:"), item.Issue.Number, err)
-		}
-		if hasOriginal && !issue.EqualForConflictCheck(remote, original) {
-			conflicts = append(conflicts, item.Issue.Number.String())
+	}
+
+	// Phase 3: Detect conflicts and compute changes
+	var conflicts []string
+	var batchUpdates []ghcli.BatchIssueUpdate
+	type postBatchWork struct {
+		Item        *IssueFile
+		Original    issue.Issue
+		Change      ghcli.IssueChange
+	}
+	var postBatchWorks []postBatchWork
+
+	for _, pu := range pendingUpdates {
+		numStr := pu.Item.Issue.Number.String()
+		remote, ok := remoteIssues[numStr]
+		if !ok {
+			fmt.Fprintf(a.Err, "%s issue #%s not found on remote\n", t.WarningText("Warning:"), numStr)
 			continue
 		}
+
+		if pu.HasOriginal && !issue.EqualForConflictCheck(remote, pu.Original) {
+			conflicts = append(conflicts, numStr)
+			continue
+		}
+
 		// Use remote as baseline if no original exists (for state transitions)
-		baseline := original
-		if !hasOriginal {
+		baseline := pu.Original
+		if !pu.HasOriginal {
 			baseline = remote
 		}
-		change := diffIssue(baseline, item.Issue)
+		change := diffIssue(baseline, pu.Item.Issue)
+
+		// Handle state transitions immediately (can't be batched)
 		if change.StateTransition != nil {
 			if *change.StateTransition == "close" {
 				reason := ""
 				if change.StateReason != nil {
 					reason = *change.StateReason
 				}
-				if err := client.CloseIssue(ctx, item.Issue.Number.String(), reason); err != nil {
+				if err := client.CloseIssue(ctx, numStr, reason); err != nil {
 					return err
 				}
 			} else if *change.StateTransition == "reopen" {
-				if err := client.ReopenIssue(ctx, item.Issue.Number.String()); err != nil {
+				if err := client.ReopenIssue(ctx, numStr); err != nil {
 					return err
 				}
 			}
 		}
+
+		// Build batch update for basic fields
 		if hasEdits(change) {
-			if err := client.EditIssue(ctx, item.Issue.Number.String(), change); err != nil {
-				return err
+			update := ghcli.BatchIssueUpdate{Number: numStr}
+			if change.Title != nil {
+				update.Title = change.Title
 			}
+			if change.Body != nil {
+				update.Body = change.Body
+			}
+			if change.Milestone != nil {
+				update.Milestone = change.Milestone
+			}
+			// For labels and assignees, we need the final set, not add/remove
+			// Use empty slice (not nil) to clear all labels/assignees
+			if len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 {
+				if pu.Item.Issue.Labels == nil {
+					update.Labels = []string{}
+				} else {
+					update.Labels = pu.Item.Issue.Labels
+				}
+			}
+			if len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0 {
+				if pu.Item.Issue.Assignees == nil {
+					update.Assignees = []string{}
+				} else {
+					update.Assignees = pu.Item.Issue.Assignees
+				}
+			}
+			batchUpdates = append(batchUpdates, update)
 		}
 
+		// Queue post-batch work (issue type, relationships, projects)
+		postBatchWorks = append(postBatchWorks, postBatchWork{
+			Item:     pu.Item,
+			Original: pu.Original,
+			Change:   change,
+		})
+	}
+
+	// Phase 4: Execute batch update (one API call for all basic edits)
+	if len(batchUpdates) > 0 {
+		result, err := client.BatchEditIssues(ctx, batchUpdates)
+		if err != nil {
+			return fmt.Errorf("batch update failed: %w", err)
+		}
+		// Report any errors from the batch
+		for num, errMsg := range result.Errors {
+			fmt.Fprintf(a.Err, "%s updating #%s: %s\n", t.WarningText("Warning:"), num, errMsg)
+		}
+	}
+
+	// Phase 5: Handle post-batch work (issue type, relationships, projects) and finalize
+	for _, work := range postBatchWorks {
+		numStr := work.Item.Issue.Number.String()
+
 		// Sync issue type via GraphQL (if changed)
-		if change.IssueType != nil {
+		if work.Change.IssueType != nil {
 			issueTypeID := ""
-			if *change.IssueType != "" {
-				if it, ok := knownIssueTypes[strings.ToLower(*change.IssueType)]; ok {
+			if *work.Change.IssueType != "" {
+				if it, ok := knownIssueTypes[strings.ToLower(*work.Change.IssueType)]; ok {
 					issueTypeID = it.ID
 				} else {
 					fmt.Fprintf(a.Err, "%s unknown issue type %q for #%s\n",
-						t.WarningText("Warning:"), *change.IssueType, item.Issue.Number)
+						t.WarningText("Warning:"), *work.Change.IssueType, numStr)
 				}
 			}
-			if issueTypeID != "" || *change.IssueType == "" {
-				if err := client.SetIssueType(ctx, item.Issue.Number.String(), issueTypeID); err != nil {
+			if issueTypeID != "" || *work.Change.IssueType == "" {
+				if err := client.SetIssueType(ctx, numStr, issueTypeID); err != nil {
 					fmt.Fprintf(a.Err, "%s setting issue type for #%s: %v\n",
-						t.WarningText("Warning:"), item.Issue.Number, err)
+						t.WarningText("Warning:"), numStr, err)
 				}
 			}
 		}
 
 		// Sync parent and blocking relationships via GraphQL
-		if err := client.SyncRelationships(ctx, item.Issue.Number.String(), item.Issue); err != nil {
-			// Log but don't fail - relationships might not be supported
+		if err := client.SyncRelationships(ctx, numStr, work.Item.Issue); err != nil {
 			fmt.Fprintf(a.Err, "%s syncing relationships for #%s: %v\n",
-				t.WarningText("Warning:"), item.Issue.Number, err)
+				t.WarningText("Warning:"), numStr, err)
 		}
 
 		// Sync projects via GraphQL (if changed)
-		if len(change.AddProjects) > 0 || len(change.RemoveProjects) > 0 {
+		if len(work.Change.AddProjects) > 0 || len(work.Change.RemoveProjects) > 0 {
 			projectIDs := make(map[string]string)
-			for _, p := range knownProjects {
-				projectIDs[strings.ToLower(p.Title)] = p.ID
+			for _, proj := range knownProjects {
+				projectIDs[strings.ToLower(proj.Title)] = proj.ID
 			}
-			if err := client.SyncProjects(ctx, item.Issue.Number.String(), item.Issue.Projects, projectIDs); err != nil {
+			if err := client.SyncProjects(ctx, numStr, work.Item.Issue.Projects, projectIDs); err != nil {
 				fmt.Fprintf(a.Err, "%s syncing projects for #%s: %v\n",
-					t.WarningText("Warning:"), item.Issue.Number, err)
+					t.WarningText("Warning:"), numStr, err)
 			}
 		}
 
-		item.Issue.SyncedAt = ptrTime(a.Now().UTC())
-		if err := issue.WriteFile(item.Path, item.Issue); err != nil {
+		work.Item.Issue.SyncedAt = ptrTime(a.Now().UTC())
+		if err := issue.WriteFile(work.Item.Path, work.Item.Issue); err != nil {
 			return err
 		}
-		if err := writeOriginalIssue(p, item.Issue); err != nil {
+		if err := writeOriginalIssue(p, work.Item.Issue); err != nil {
 			return err
 		}
-		fmt.Fprintln(a.Out, t.FormatIssueHeader("U", item.Issue.Number.String(), item.Issue.Title))
-		for _, line := range a.formatChangeLines(original, item.Issue, labelColors) {
+		fmt.Fprintln(a.Out, t.FormatIssueHeader("U", numStr, work.Item.Issue.Title))
+		for _, line := range a.formatChangeLines(work.Original, work.Item.Issue, labelColors) {
 			fmt.Fprintln(a.Out, line)
 		}
 	}
