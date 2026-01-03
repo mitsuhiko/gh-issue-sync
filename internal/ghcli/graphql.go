@@ -719,7 +719,7 @@ func (c *Client) batchEditIssuesChunk(ctx context.Context, updates []BatchIssueU
 			inputParts = append(inputParts, fmt.Sprintf("title: %q", *u.Title))
 		}
 		if u.Body != nil {
-			inputParts = append(inputParts, fmt.Sprintf("body: %q", EscapeGraphQLString(*u.Body)))
+			inputParts = append(inputParts, fmt.Sprintf("body: %q", *u.Body))
 		}
 
 		// Handle milestone
