@@ -851,10 +851,12 @@ func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
 	count := 0
 	for _, file := range files {
 		local := issue.Normalize(file.Issue)
+		localOnly := local.Number.IsLocal()
 
 		var base issue.Issue
+		status := "M"
 		if opts.Remote {
-			if local.Number.IsLocal() {
+			if localOnly {
 				continue // skip local-only issues for remote diff
 			}
 			remote, err := client.GetIssue(ctx, local.Number.String())
@@ -864,11 +866,16 @@ func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
 			}
 			base = issue.Normalize(remote)
 		} else {
-			original, hasOriginal := readOriginalIssue(p, local.Number.String())
-			if !hasOriginal {
-				continue // skip issues without original
+			if localOnly {
+				base = issue.Issue{}
+				status = "A"
+			} else {
+				original, hasOriginal := readOriginalIssue(p, local.Number.String())
+				if !hasOriginal {
+					continue // skip issues without original
+				}
+				base = issue.Normalize(original)
 			}
-			base = issue.Normalize(original)
 		}
 
 		if issue.EqualIgnoringSyncedAt(base, local) {
@@ -881,7 +888,7 @@ func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
 		count++
 
 		// Print header
-		fmt.Fprintln(a.Out, t.FormatIssueHeader("M", local.Number.String(), local.Title))
+		fmt.Fprintln(a.Out, t.FormatIssueHeader(status, local.Number.String(), local.Title))
 
 		// Print metadata changes
 		for _, line := range a.formatChangeLines(base, local, labelColors) {
@@ -949,15 +956,17 @@ func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
 		base = remote
 		baseLabel = "remote"
 	} else {
-		original, hasOriginal := readOriginalIssue(p, local.Number.String())
-		if !hasOriginal {
-			if local.Number.IsLocal() {
-				return fmt.Errorf("local issue %s has no original (not yet pushed)", local.Number)
+		if local.Number.IsLocal() {
+			base = issue.Issue{}
+			baseLabel = "new"
+		} else {
+			original, hasOriginal := readOriginalIssue(p, local.Number.String())
+			if !hasOriginal {
+				return fmt.Errorf("no original found for issue %s (try pulling first)", local.Number)
 			}
-			return fmt.Errorf("no original found for issue %s (try pulling first)", local.Number)
+			base = original
+			baseLabel = "original"
 		}
-		base = original
-		baseLabel = "original"
 	}
 
 	// Normalize for comparison
@@ -974,8 +983,13 @@ func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
 		return nil
 	}
 
+	status := "M"
+	if local.Number.IsLocal() && !opts.Remote {
+		status = "A"
+	}
+
 	// Print header in same format as push/pull
-	fmt.Fprintln(a.Out, t.FormatIssueHeader("M", local.Number.String(), local.Title))
+	fmt.Fprintln(a.Out, t.FormatIssueHeader(status, local.Number.String(), local.Title))
 
 	// Print metadata changes using formatChangeLines (same as push/pull)
 	for _, line := range a.formatChangeLines(base, local, labelColors) {

@@ -14,19 +14,19 @@ type Query struct {
 	Text string
 
 	// Qualifiers
-	State     string   // "open" or "closed"
-	Labels    []string // label:X
-	NoLabel   bool     // no:label
-	Assignees []string // assignee:X
-	NoAssignee bool    // no:assignee
-	Authors   []string // author:X
-	Milestones []string // milestone:X
-	NoMilestone bool   // no:milestone
-	Mentions  []string // mentions:X
-	Types     []string // type:X
-	NoType    bool     // no:type
-	Projects  []string // project:X
-	NoProject bool     // no:project
+	State       string   // "open" or "closed"
+	Labels      []string // label:X
+	NoLabel     bool     // no:label
+	Assignees   []string // assignee:X
+	NoAssignee  bool     // no:assignee
+	Authors     []string // author:X
+	Milestones  []string // milestone:X
+	NoMilestone bool     // no:milestone
+	Mentions    []string // mentions:X
+	Types       []string // type:X
+	NoType      bool     // no:type
+	Projects    []string // project:X
+	NoProject   bool     // no:project
 
 	// Sort
 	SortField string // "created", "updated", "comments" (default: "created")

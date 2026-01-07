@@ -504,7 +504,7 @@ const (
 
 type diffOp struct {
 	Type    diffOpType
-	Text    string    // The text (or old text for diffChange)
-	NewText string    // Only used for diffChange - the new text
-	CharOps []diffOp  // Only used for diffChange - character-level operations
+	Text    string   // The text (or old text for diffChange)
+	NewText string   // Only used for diffChange - the new text
+	CharOps []diffOp // Only used for diffChange - character-level operations
 }

@@ -36,15 +36,15 @@ func TestWordsSimilar(t *testing.T) {
 
 func TestComputeCharDiff(t *testing.T) {
 	tests := []struct {
-		old, new    string
-		wantDel     string // expected deleted chars
-		wantIns     string // expected inserted chars
-		wantMinEq   int    // minimum expected equal chars
+		old, new  string
+		wantDel   string // expected deleted chars
+		wantIns   string // expected inserted chars
+		wantMinEq int    // minimum expected equal chars
 	}{
-		{"foo", "foo!", "", "!", 3},      // append: foo stays, ! added
-		{"foo", "!foo", "", "!", 3},      // prepend: foo stays, ! added
-		{"color", "colour", "", "u", 5},  // LCS keeps "color", inserts "u"
-		{"hello", "hallo", "e", "a", 4},  // replace e with a
+		{"foo", "foo!", "", "!", 3},     // append: foo stays, ! added
+		{"foo", "!foo", "", "!", 3},     // prepend: foo stays, ! added
+		{"color", "colour", "", "u", 5}, // LCS keeps "color", inserts "u"
+		{"hello", "hallo", "e", "a", 4}, // replace e with a
 	}
 
 	for _, tc := range tests {
@@ -69,7 +69,7 @@ func TestComputeCharDiff(t *testing.T) {
 			t.Errorf("computeCharDiff(%q, %q): inserted = %q, want %q", tc.old, tc.new, ins.String(), tc.wantIns)
 		}
 		if len(eq.String()) < tc.wantMinEq {
-			t.Errorf("computeCharDiff(%q, %q): equal = %q (len %d), want at least %d chars", 
+			t.Errorf("computeCharDiff(%q, %q): equal = %q (len %d), want at least %d chars",
 				tc.old, tc.new, eq.String(), len(eq.String()), tc.wantMinEq)
 		}
 	}

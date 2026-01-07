@@ -622,11 +622,11 @@ func TestRunInteractiveCommandQuotedPaths(t *testing.T) {
 			wantArgs: nil,
 		},
 		{
-			name:     "extra args appended",
-			command:  "code --wait",
+			name:      "extra args appended",
+			command:   "code --wait",
 			extraArgs: []string{"/tmp/file.md"},
-			wantName: "code",
-			wantArgs: []string{"--wait", "/tmp/file.md"},
+			wantName:  "code",
+			wantArgs:  []string{"--wait", "/tmp/file.md"},
 		},
 		{
 			name:        "empty command",

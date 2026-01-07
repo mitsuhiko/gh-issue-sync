@@ -50,18 +50,18 @@ type InfoSection struct {
 }
 
 type FrontMatter struct {
-	Title       string     `yaml:"title"`
-	Labels      []string   `yaml:"labels,omitempty"`
-	Assignees   []string   `yaml:"assignees,omitempty"`
-	Milestone   string     `yaml:"milestone,omitempty"`
-	IssueType   string     `yaml:"type,omitempty"`
-	Projects    []string   `yaml:"projects,omitempty"`
-	State       string     `yaml:"state,omitempty"`
-	StateReason *string    `yaml:"state_reason"`
-	Parent      *IssueRef  `yaml:"parent,omitempty"`
-	BlockedBy   []IssueRef `yaml:"blocked_by,omitempty"`
-	Blocks      []IssueRef `yaml:"blocks,omitempty"`
-	SyncedAt    *time.Time `yaml:"synced_at,omitempty"`
+	Title       string       `yaml:"title"`
+	Labels      []string     `yaml:"labels,omitempty"`
+	Assignees   []string     `yaml:"assignees,omitempty"`
+	Milestone   string       `yaml:"milestone,omitempty"`
+	IssueType   string       `yaml:"type,omitempty"`
+	Projects    []string     `yaml:"projects,omitempty"`
+	State       string       `yaml:"state,omitempty"`
+	StateReason *string      `yaml:"state_reason"`
+	Parent      *IssueRef    `yaml:"parent,omitempty"`
+	BlockedBy   []IssueRef   `yaml:"blocked_by,omitempty"`
+	Blocks      []IssueRef   `yaml:"blocks,omitempty"`
+	SyncedAt    *time.Time   `yaml:"synced_at,omitempty"`
 	Info        *InfoSection `yaml:"info,omitempty"`
 }
 
