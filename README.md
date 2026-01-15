@@ -39,6 +39,7 @@ create new issues locally, and push changes back to GitHub when ready.
 Prerequisites:
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated (`gh auth login`)
+- If you use Projects sync, refresh scopes with `gh auth refresh -s project`
 
 ### Quick Install (macOS/Linux)
 
