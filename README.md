@@ -148,7 +148,7 @@ gh-issue-sync write-skill --agent codex --scope project
 | `codex` | `~/.codex/skills/` | `.codex/skills/` |
 | `pi` | `~/.pi/skills/` | `.pi/skills/` |
 | `claude` | `~/.claude/skills/` | `.claude/skills/` |
-| `opencode` | `~/.config/opencode/skill/` | `.opencode/skill/` |
+| `opencode` | `~/.config/opencode/skills/` | `.opencode/skills/` |
 | `amp`, `generic` | `~/.config/agents/skills/` | `.agents/skills/` |
 
 To install to a custom location:

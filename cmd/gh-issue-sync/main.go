@@ -347,7 +347,7 @@ func (c *WriteSkillCommand) Execute(args []string) error {
 			} else {
 				agentDir = ".opencode"
 			}
-			skillSubdir = "skill"
+			skillSubdir = "skills"
 		case "amp", "generic":
 			if c.Scope == "user" {
 				agentDir = filepath.Join(".config", "agents")
