@@ -338,7 +338,11 @@ func (c *WriteSkillCommand) Execute(args []string) error {
 		case "codex":
 			agentDir = ".codex"
 		case "pi":
-			agentDir = ".pi"
+			if c.Scope == "user" {
+				agentDir = filepath.Join(".pi", "agent")
+			} else {
+				agentDir = ".pi"
+			}
 		case "claude":
 			agentDir = ".claude"
 		case "opencode":

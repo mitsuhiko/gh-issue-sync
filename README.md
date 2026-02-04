@@ -146,7 +146,7 @@ gh-issue-sync write-skill --agent codex --scope project
 | Agent | User Scope | Project Scope |
 |-------|------------|---------------|
 | `codex` | `~/.codex/skills/` | `.codex/skills/` |
-| `pi` | `~/.pi/skills/` | `.pi/skills/` |
+| `pi` | `~/.pi/agent/skills/` | `.pi/skills/` |
 | `claude` | `~/.claude/skills/` | `.claude/skills/` |
 | `opencode` | `~/.config/opencode/skills/` | `.opencode/skills/` |
 | `amp`, `generic` | `~/.config/agents/skills/` | `.agents/skills/` |
