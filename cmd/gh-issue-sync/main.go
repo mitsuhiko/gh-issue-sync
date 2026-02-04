@@ -338,7 +338,11 @@ func (c *WriteSkillCommand) Execute(args []string) error {
 		case "codex":
 			agentDir = ".codex"
 		case "pi":
-			agentDir = ".pi"
+			if c.Scope == "user" {
+				agentDir = filepath.Join(".pi", "agent")
+			} else {
+				agentDir = ".pi"
+			}
 		case "claude":
 			agentDir = ".claude"
 		case "opencode":
@@ -347,7 +351,7 @@ func (c *WriteSkillCommand) Execute(args []string) error {
 			} else {
 				agentDir = ".opencode"
 			}
-			skillSubdir = "skill"
+			skillSubdir = "skills"
 		case "amp", "generic":
 			if c.Scope == "user" {
 				agentDir = filepath.Join(".config", "agents")
