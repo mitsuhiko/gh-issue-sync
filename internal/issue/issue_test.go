@@ -100,6 +100,21 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+func TestFileNameTruncatesLongSlugToFilesystemLimit(t *testing.T) {
+	title := strings.Repeat("a", 600)
+	name := FileName(IssueNumber("7895"), title)
+
+	if len(name) > 255 {
+		t.Fatalf("filename too long: got %d bytes (%q)", len(name), name)
+	}
+	if !strings.HasPrefix(name, "7895-") {
+		t.Fatalf("filename missing number prefix: %q", name)
+	}
+	if !strings.HasSuffix(name, ".md") {
+		t.Fatalf("filename missing extension: %q", name)
+	}
+}
+
 func TestInfoSectionRoundTrip(t *testing.T) {
 	input := strings.TrimSpace(`---
 title: "Test issue with author"

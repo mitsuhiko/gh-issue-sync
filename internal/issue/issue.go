@@ -208,12 +208,30 @@ func WriteFile(path string, issue Issue) error {
 	return osWriteFile(path, []byte(content), 0o644)
 }
 
+const maxFilenameLength = 255
+
 func FileName(number IssueNumber, title string) string {
 	slug := Slugify(title)
 	if slug == "" {
 		slug = "issue"
 	}
-	return fmt.Sprintf("%s-%s.md", number, slug)
+
+	prefix := fmt.Sprintf("%s-", number)
+	maxSlugLength := maxFilenameLength - len(prefix) - len(".md")
+	if maxSlugLength < 1 {
+		return fmt.Sprintf("%s.md", number)
+	}
+	if len(slug) > maxSlugLength {
+		slug = strings.Trim(slug[:maxSlugLength], "-")
+		if slug == "" {
+			slug = "issue"
+			if len(slug) > maxSlugLength {
+				slug = slug[:maxSlugLength]
+			}
+		}
+	}
+
+	return prefix + slug + ".md"
 }
 
 func PathFor(dir string, number IssueNumber, title string) string {
