@@ -37,18 +37,6 @@ type graphqlIssue struct {
 		Number int    `json:"number"`
 		ID     string `json:"id"`
 	} `json:"parent"`
-	BlockedBy struct {
-		Nodes []struct {
-			Number int    `json:"number"`
-			ID     string `json:"id"`
-		} `json:"nodes"`
-	} `json:"blockedBy"`
-	Blocking struct {
-		Nodes []struct {
-			Number int    `json:"number"`
-			ID     string `json:"id"`
-		} `json:"nodes"`
-	} `json:"blocking"`
 }
 
 type graphqlResponse struct {
@@ -143,18 +131,6 @@ func (c *Client) getIssueRelationshipsBatchChunk(ctx context.Context, numbers []
         number
         id
       }
-      blockedBy(first: 100) {
-        nodes {
-          number
-          id
-        }
-      }
-      blocking(first: 100) {
-        nodes {
-          number
-          id
-        }
-      }
     }`, i, n))
 	}
 
@@ -233,12 +209,6 @@ func (c *Client) getIssueRelationshipsBatchChunk(ctx context.Context, numbers []
 		if issueData.Parent != nil {
 			ref := issue.IssueRef(strconv.Itoa(issueData.Parent.Number))
 			rels.Parent = &ref
-		}
-		for _, node := range issueData.BlockedBy.Nodes {
-			rels.BlockedBy = append(rels.BlockedBy, issue.IssueRef(strconv.Itoa(node.Number)))
-		}
-		for _, node := range issueData.Blocking.Nodes {
-			rels.Blocks = append(rels.Blocks, issue.IssueRef(strconv.Itoa(node.Number)))
 		}
 
 		results[strconv.Itoa(issueData.Number)] = rels
