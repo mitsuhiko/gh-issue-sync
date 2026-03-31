@@ -76,8 +76,12 @@ func (c *Client) withRepo(args []string) []string {
 	if c.repo == "" {
 		return args
 	}
+	// gh api no longer accepts --repo; repo must be part of endpoint/parameters.
+	if len(args) > 0 && args[0] == "api" {
+		return args
+	}
 	for i := range args {
-		if args[i] == "--repo" {
+		if args[i] == "--repo" || args[i] == "-R" {
 			return args
 		}
 	}

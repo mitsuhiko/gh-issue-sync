@@ -51,17 +51,17 @@ func TestCloseIssueReasonNormalization(t *testing.T) {
 		{
 			name:     "not_planned converts to gh format",
 			reason:   "not_planned",
-			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=not_planned", "--repo", "octo/repo"},
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=not_planned"},
 		},
 		{
 			name:     "completed reason",
 			reason:   "completed",
-			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "--repo", "octo/repo"},
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=completed"},
 		},
 		{
 			name:     "empty reason omits flag",
 			reason:   "",
-			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "--repo", "octo/repo"},
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed"},
 		},
 	}
 
