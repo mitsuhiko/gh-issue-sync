@@ -2,6 +2,7 @@ package ghcli
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -39,4 +40,57 @@ func hasRepoFlag(args []string, repo string) bool {
 		}
 	}
 	return false
+}
+
+func TestCloseIssueReasonNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		reason   string
+		expected []string
+	}{
+		{
+			name:     "not_planned converts to gh format",
+			reason:   "not_planned",
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=not_planned", "--repo", "octo/repo"},
+		},
+		{
+			name:     "completed reason",
+			reason:   "completed",
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "-f", "state_reason=completed", "--repo", "octo/repo"},
+		},
+		{
+			name:     "empty reason omits flag",
+			reason:   "",
+			expected: []string{"api", "repos/octo/repo/issues/929", "--method", "PATCH", "-f", "state=closed", "--repo", "octo/repo"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &recordingRunner{}
+			client := NewClient(runner, "octo/repo")
+
+			if err := client.CloseIssue(context.Background(), "929", tc.reason); err != nil {
+				t.Fatalf("close issue: %v", err)
+			}
+
+			if runner.name != "gh" {
+				t.Fatalf("expected gh invocation, got %q", runner.name)
+			}
+
+			if !reflect.DeepEqual(runner.args, tc.expected) {
+				t.Fatalf("unexpected args\n got: %#v\nwant: %#v", runner.args, tc.expected)
+			}
+		})
+	}
+}
+
+func TestCloseIssueRejectsNonCanonicalReason(t *testing.T) {
+	runner := &recordingRunner{}
+	client := NewClient(runner, "octo/repo")
+
+	err := client.CloseIssue(context.Background(), "929", "not planned")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
 }

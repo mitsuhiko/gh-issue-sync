@@ -141,7 +141,7 @@ func (a apiIssue) ToIssue() issue.Issue {
 		Assignees:   assignees,
 		Milestone:   milestone,
 		State:       strings.ToLower(a.State),
-		StateReason: a.StateReason,
+		StateReason: canonicalStateReasonPtr(a.StateReason),
 		Body:        a.Body,
 		Author:      author,
 	}
@@ -441,7 +441,7 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
 				Title:       node.Title,
 				Body:        node.Body,
 				State:       strings.ToLower(node.State),
-				StateReason: node.StateReason,
+				StateReason: canonicalStateReasonPtr(node.StateReason),
 				Labels:      issLabels,
 				Assignees:   assignees,
 				Milestone:   milestone,
@@ -811,7 +811,7 @@ func (c *Client) getIssuesBatchChunk(ctx context.Context, numbers []string) (map
 			Title:       issueData.Title,
 			Body:        issueData.Body,
 			State:       strings.ToLower(issueData.State),
-			StateReason: issueData.StateReason,
+			StateReason: canonicalStateReasonPtr(issueData.StateReason),
 			Labels:      labels,
 			Assignees:   assignees,
 			Milestone:   milestone,
@@ -899,12 +899,53 @@ func (c *Client) EditIssue(ctx context.Context, number string, change IssueChang
 }
 
 func (c *Client) CloseIssue(ctx context.Context, number string, reason string) error {
-	args := []string{"issue", "close", number}
+	args := []string{"api", fmt.Sprintf("repos/%s/issues/%s", c.repo, number), "--method", "PATCH", "-f", "state=closed"}
 	if reason != "" {
-		args = append(args, "--reason", reason)
+		normalized, ok := normalizeCloseReason(reason)
+		if !ok {
+			return fmt.Errorf("unsupported close reason %q (expected completed or not_planned)", reason)
+		}
+		args = append(args, "-f", "state_reason="+normalized)
 	}
 	_, err := c.runner.Run(ctx, "gh", c.withRepo(args)...)
 	return err
+}
+
+func canonicalStateReason(reason string) string {
+	raw := strings.TrimSpace(reason)
+	if raw == "" {
+		return ""
+	}
+
+	switch strings.ToUpper(raw) {
+	case "NOT_PLANNED":
+		return "not_planned"
+	case "COMPLETED":
+		return "completed"
+	default:
+		return raw
+	}
+}
+
+func canonicalStateReasonPtr(reason *string) *string {
+	if reason == nil {
+		return nil
+	}
+	normalized := canonicalStateReason(*reason)
+	if normalized == "" {
+		return nil
+	}
+	return &normalized
+}
+
+func normalizeCloseReason(reason string) (string, bool) {
+	canonical := canonicalStateReason(reason)
+	switch canonical {
+	case "completed", "not_planned":
+		return canonical, true
+	default:
+		return "", false
+	}
 }
 
 func (c *Client) ReopenIssue(ctx context.Context, number string) error {
