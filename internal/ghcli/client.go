@@ -237,6 +237,7 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
 	firstPage := true
 	page := 0
 	totalCount := 0
+	includeProjectItems := true
 	for {
 		page++
 		cursorArg := "null"
@@ -253,6 +254,11 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
         color
       }
     }`
+		}
+
+		projectItemsFragment := ""
+		if includeProjectItems {
+			projectItemsFragment = "projectItems(first: 20) { nodes { project { title } } }"
 		}
 
 		query := fmt.Sprintf(`query($owner: String!, $repo: String!) {
@@ -277,14 +283,14 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
         assignees(first: 100) { nodes { login } }
         milestone { title }
         issueType { name }
-        projectItems(first: 20) { nodes { project { title } } }
+        %s
         parent { number }
         blockedBy(first: 100) { nodes { number } }
         blocking(first: 100) { nodes { number } }
       }
     }
   }
-}`, labelsFragment, stateArg, labelFilter, sinceArg, cursorArg)
+}`, labelsFragment, stateArg, labelFilter, sinceArg, cursorArg, projectItemsFragment)
 
 		args := []string{"api", "graphql",
 			"-f", fmt.Sprintf("query=%s", query),
@@ -301,6 +307,10 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
 
 		out, err := c.runner.Run(ctx, "gh", args...)
 		if err != nil {
+			if includeProjectItems && isProjectScopeError(err) {
+				includeProjectItems = false
+				continue
+			}
 			return ListIssuesResult{}, err
 		}
 
@@ -379,6 +389,10 @@ func (c *Client) ListIssuesWithRelationships(ctx context.Context, opts ListIssue
 		}
 
 		if len(resp.Errors) > 0 {
+			if includeProjectItems && isProjectScopeErrorText(resp.Errors[0].Message) {
+				includeProjectItems = false
+				continue
+			}
 			return ListIssuesResult{}, fmt.Errorf("GraphQL error: %s", resp.Errors[0].Message)
 		}
 
@@ -593,14 +607,21 @@ func (c *Client) getIssuesBatchChunk(ctx context.Context, numbers []string) (map
 		return nil, fmt.Errorf("invalid repository format")
 	}
 
-	// Build a batched GraphQL query with aliases for each issue
-	var issueQueries []string
-	for i, num := range numbers {
-		n, err := strconv.Atoi(num)
-		if err != nil {
-			continue
+	includeProjectItems := true
+
+	buildIssueQueries := func(withProjects bool) []string {
+		var issueQueries []string
+		projectItemsFragment := ""
+		if withProjects {
+			projectItemsFragment = "projectItems(first: 20) { nodes { project { title } } }"
 		}
-		issueQueries = append(issueQueries, fmt.Sprintf(`issue%d: issue(number: %d) {
+
+		for i, num := range numbers {
+			n, err := strconv.Atoi(num)
+			if err != nil {
+				continue
+			}
+			issueQueries = append(issueQueries, fmt.Sprintf(`issue%d: issue(number: %d) {
       number
       title
       body
@@ -613,32 +634,45 @@ func (c *Client) getIssuesBatchChunk(ctx context.Context, numbers []string) (map
       assignees(first: 100) { nodes { login } }
       milestone { title }
       issueType { name }
-      projectItems(first: 20) { nodes { project { title } } }
+      %s
       parent { number }
       blockedBy(first: 100) { nodes { number } }
       blocking(first: 100) { nodes { number } }
-    }`, i, n))
+    }`, i, n, projectItemsFragment))
+		}
+
+		return issueQueries
 	}
 
-	if len(issueQueries) == 0 {
-		return map[string]issue.Issue{}, nil
-	}
+	var out string
+	for {
+		issueQueries := buildIssueQueries(includeProjectItems)
+		if len(issueQueries) == 0 {
+			return map[string]issue.Issue{}, nil
+		}
 
-	query := fmt.Sprintf(`query($owner: String!, $repo: String!) {
+		query := fmt.Sprintf(`query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
     %s
   }
 }`, strings.Join(issueQueries, "\n    "))
 
-	args := []string{"api", "graphql",
-		"-f", fmt.Sprintf("query=%s", query),
-		"-F", fmt.Sprintf("owner=%s", owner),
-		"-F", fmt.Sprintf("repo=%s", repo),
-	}
+		args := []string{"api", "graphql",
+			"-f", fmt.Sprintf("query=%s", query),
+			"-F", fmt.Sprintf("owner=%s", owner),
+			"-F", fmt.Sprintf("repo=%s", repo),
+		}
 
-	out, err := c.runner.Run(ctx, "gh", args...)
-	if err != nil {
-		return nil, err
+		var err error
+		out, err = c.runner.Run(ctx, "gh", args...)
+		if err != nil {
+			if includeProjectItems && isProjectScopeError(err) {
+				includeProjectItems = false
+				continue
+			}
+			return nil, err
+		}
+		break
 	}
 
 	var resp struct {
@@ -654,7 +688,32 @@ func (c *Client) getIssuesBatchChunk(ctx context.Context, numbers []string) (map
 	}
 
 	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("GraphQL error: %s", resp.Errors[0].Message)
+		if includeProjectItems && isProjectScopeErrorText(resp.Errors[0].Message) {
+			includeProjectItems = false
+			issueQueries := buildIssueQueries(includeProjectItems)
+			query := fmt.Sprintf(`query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    %s
+  }
+}`, strings.Join(issueQueries, "\n    "))
+			args := []string{"api", "graphql",
+				"-f", fmt.Sprintf("query=%s", query),
+				"-F", fmt.Sprintf("owner=%s", owner),
+				"-F", fmt.Sprintf("repo=%s", repo),
+			}
+			out, err := c.runner.Run(ctx, "gh", args...)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				return nil, fmt.Errorf("failed to parse GraphQL response: %w", err)
+			}
+			if len(resp.Errors) > 0 {
+				return nil, fmt.Errorf("GraphQL error: %s", resp.Errors[0].Message)
+			}
+		} else {
+			return nil, fmt.Errorf("GraphQL error: %s", resp.Errors[0].Message)
+		}
 	}
 
 	results := make(map[string]issue.Issue)

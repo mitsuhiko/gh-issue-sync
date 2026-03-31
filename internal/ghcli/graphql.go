@@ -178,7 +178,7 @@ func (c *Client) getIssueRelationshipsBatchChunk(ctx context.Context, numbers []
 	if err != nil {
 		// Silently return empty results if the token lacks required scopes
 		// (e.g., read:project). This is not a fatal error.
-		if strings.Contains(err.Error(), "required scopes") {
+		if isProjectScopeError(err) {
 			return map[string]IssueRelationships{}, nil
 		}
 		return nil, err
@@ -199,7 +199,7 @@ func (c *Client) getIssueRelationshipsBatchChunk(ctx context.Context, numbers []
 
 	if len(resp.Errors) > 0 {
 		// Silently return empty results for scope errors
-		if strings.Contains(resp.Errors[0].Message, "required scopes") {
+		if isProjectScopeErrorText(resp.Errors[0].Message) {
 			return map[string]IssueRelationships{}, nil
 		}
 		return nil, fmt.Errorf("GraphQL error: %s", resp.Errors[0].Message)
