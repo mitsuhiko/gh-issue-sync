@@ -129,17 +129,14 @@ func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
 		return err
 	}
 
-	// Collect all labels and milestones that will be needed
+	// Collect labels and locally changed milestones that will be needed.
 	neededLabels := make(map[string]struct{})
-	neededMilestones := make(map[string]struct{})
 	for _, item := range filteredIssues {
 		for _, label := range item.Issue.Labels {
 			neededLabels[label] = struct{}{}
 		}
-		if item.Issue.Milestone != "" {
-			neededMilestones[item.Issue.Milestone] = struct{}{}
-		}
 	}
+	neededMilestones := neededMilestonesForPush(p, filteredIssues)
 
 	// Count missing labels and milestones
 	var missingLabels []string
