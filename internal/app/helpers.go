@@ -66,6 +66,25 @@ func hasEdits(change ghcli.IssueChange) bool {
 	return change.Title != nil || change.Body != nil || change.Milestone != nil || len(change.AddLabels) > 0 || len(change.RemoveLabels) > 0 || len(change.AddAssignees) > 0 || len(change.RemoveAssignees) > 0
 }
 
+func neededMilestonesForPush(p paths.Paths, issues []IssueFile) map[string]struct{} {
+	needed := make(map[string]struct{})
+	for i := range issues {
+		item := &issues[i]
+		if item.Issue.Milestone == "" {
+			continue
+		}
+		if item.Issue.Number.IsLocal() {
+			needed[item.Issue.Milestone] = struct{}{}
+			continue
+		}
+		original, hasOriginal := readOriginalIssue(p, item.Issue.Number.String())
+		if !hasOriginal || original.Milestone != item.Issue.Milestone {
+			needed[item.Issue.Milestone] = struct{}{}
+		}
+	}
+	return needed
+}
+
 func diffStringSet(old, new []string) ([]string, []string) {
 	oldSet := make(map[string]struct{}, len(old))
 	for _, item := range old {

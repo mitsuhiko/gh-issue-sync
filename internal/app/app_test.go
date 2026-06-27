@@ -16,6 +16,16 @@ import (
 	"github.com/mitsuhiko/gh-issue-sync/internal/paths"
 )
 
+type failRunner struct {
+	t *testing.T
+}
+
+func (r failRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	r.t.Helper()
+	r.t.Fatalf("unexpected command: %s %s", name, strings.Join(args, " "))
+	return "", fmt.Errorf("unexpected command")
+}
+
 func TestApplyMapping(t *testing.T) {
 	parent := issue.IssueRef("T1")
 	item := issue.Issue{
@@ -92,6 +102,119 @@ func TestApplyMappingNoChange(t *testing.T) {
 	changed := applyMapping(&item, mapping)
 	if changed {
 		t.Fatalf("expected no change")
+	}
+}
+
+func TestPushDryRunDoesNotCreateMilestoneForUnchangedMilestoneField(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(root)
+	if err := p.EnsureLayout(); err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	if err := config.Save(p.ConfigPath, config.Default("owner", "repo")); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	writePushMetadataCaches(t, p, "renamed")
+
+	original := issue.Issue{
+		Number:    issue.IssueNumber("1"),
+		Title:     "Original title",
+		State:     "open",
+		Milestone: "old-name",
+		Body:      "Body\n",
+	}
+	local := original
+	local.Title = "Updated title"
+
+	if err := issue.WriteFile(filepath.Join(p.OriginalsDir, "1.md"), original); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	if err := issue.WriteFile(issue.PathFor(p.OpenDir, local.Number, local.Title), local); err != nil {
+		t.Fatalf("write local: %v", err)
+	}
+
+	var out strings.Builder
+	application := New(root, failRunner{t: t}, &out, io.Discard)
+	if err := application.Push(context.Background(), PushOptions{DryRun: true}, nil); err != nil {
+		t.Fatalf("push dry-run: %v", err)
+	}
+
+	output := out.String()
+	if strings.Contains(output, "Would create milestone") {
+		t.Fatalf("unchanged stale milestone should not be created: %s", output)
+	}
+	if !strings.Contains(output, "Would push issue") {
+		t.Fatalf("expected issue update in dry-run output: %s", output)
+	}
+}
+
+func TestPushDryRunCreatesMilestoneForChangedMilestoneField(t *testing.T) {
+	root := t.TempDir()
+	p := paths.New(root)
+	if err := p.EnsureLayout(); err != nil {
+		t.Fatalf("layout: %v", err)
+	}
+	if err := config.Save(p.ConfigPath, config.Default("owner", "repo")); err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	writePushMetadataCaches(t, p, "old-name")
+
+	original := issue.Issue{
+		Number:    issue.IssueNumber("1"),
+		Title:     "Original title",
+		State:     "open",
+		Milestone: "old-name",
+		Body:      "Body\n",
+	}
+	local := original
+	local.Milestone = "next-name"
+
+	if err := issue.WriteFile(filepath.Join(p.OriginalsDir, "1.md"), original); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	if err := issue.WriteFile(issue.PathFor(p.OpenDir, local.Number, local.Title), local); err != nil {
+		t.Fatalf("write local: %v", err)
+	}
+
+	var out strings.Builder
+	application := New(root, failRunner{t: t}, &out, io.Discard)
+	if err := application.Push(context.Background(), PushOptions{DryRun: true}, nil); err != nil {
+		t.Fatalf("push dry-run: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "Would create milestone") || !strings.Contains(output, "next-name") {
+		t.Fatalf("changed missing milestone should be created: %s", output)
+	}
+}
+
+func writePushMetadataCaches(t *testing.T, p paths.Paths, milestones ...string) {
+	t.Helper()
+
+	if err := saveLabelCache(p, LabelCache{
+		Labels: []LabelEntry{{Name: "existing", Color: "0052CC"}},
+	}); err != nil {
+		t.Fatalf("label cache: %v", err)
+	}
+
+	milestoneEntries := make([]MilestoneEntry, 0, len(milestones))
+	for _, title := range milestones {
+		milestoneEntries = append(milestoneEntries, MilestoneEntry{Title: title, State: "open"})
+	}
+	if err := saveMilestoneCache(p, MilestoneCache{Milestones: milestoneEntries}); err != nil {
+		t.Fatalf("milestone cache: %v", err)
+	}
+
+	if err := saveIssueTypeCache(p, IssueTypeCache{
+		IssueTypes: []IssueTypeEntry{{ID: "IT_kwDO", Name: "Task"}},
+	}); err != nil {
+		t.Fatalf("issue type cache: %v", err)
+	}
+
+	if err := saveProjectCache(p, ProjectCache{
+		Projects: []ProjectEntry{{ID: "PVT_kwDO", Title: "Roadmap"}},
+	}); err != nil {
+		t.Fatalf("project cache: %v", err)
 	}
 }
 
