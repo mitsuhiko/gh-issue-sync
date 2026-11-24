@@ -18,7 +18,7 @@ import (
 )
 
 func (a *App) Pull(ctx context.Context, opts PullOptions, args []string) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	cfg, err := loadConfig(p.ConfigPath)
 	if err != nil {
 		return err

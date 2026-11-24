@@ -10,7 +10,6 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/mitsuhiko/gh-issue-sync/internal/app"
 	"github.com/mitsuhiko/gh-issue-sync/internal/ghcli"
-	"github.com/mitsuhiko/gh-issue-sync/internal/paths"
 	"github.com/mitsuhiko/gh-issue-sync/skill"
 )
 
@@ -380,15 +379,7 @@ func main() {
 		panic(err)
 	}
 
-	// Find the root directory for .issues
-	// For init, we'll use git root; for other commands, find existing .issues
-	root := paths.FindIssuesDir(cwd)
-	if root == "" {
-		// Fall back to cwd (init will handle finding git root)
-		root = cwd
-	}
-
-	application := app.New(root, ghcli.ExecRunner{}, os.Stdout, os.Stderr)
+	application := app.New(cwd, ghcli.ExecRunner{}, os.Stdout, os.Stderr)
 	opts := Options{}
 	opts.Init.App = application
 	opts.Pull.App = application

@@ -10,11 +10,10 @@ import (
 	"github.com/mitsuhiko/gh-issue-sync/internal/ghcli"
 	"github.com/mitsuhiko/gh-issue-sync/internal/issue"
 	"github.com/mitsuhiko/gh-issue-sync/internal/lock"
-	"github.com/mitsuhiko/gh-issue-sync/internal/paths"
 )
 
 func (a *App) Push(ctx context.Context, opts PushOptions, args []string) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	cfg, err := loadConfig(p.ConfigPath)
 	if err != nil {
 		return err

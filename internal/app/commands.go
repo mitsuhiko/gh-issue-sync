@@ -16,12 +16,11 @@ import (
 	"github.com/mitsuhiko/gh-issue-sync/internal/issue"
 	"github.com/mitsuhiko/gh-issue-sync/internal/localid"
 	"github.com/mitsuhiko/gh-issue-sync/internal/lock"
-	"github.com/mitsuhiko/gh-issue-sync/internal/paths"
 	"github.com/mitsuhiko/gh-issue-sync/internal/search"
 )
 
 func (a *App) Status(ctx context.Context) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	cfg, err := loadConfig(p.ConfigPath)
 	if err != nil {
 		return err
@@ -152,7 +151,7 @@ func (a *App) Status(ctx context.Context) error {
 }
 
 func (a *App) List(ctx context.Context, opts ListOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	if _, err := loadConfig(p.ConfigPath); err != nil {
 		return err
 	}
@@ -459,7 +458,7 @@ func (a *App) printIssueLine(item IssueFile, labelColors map[string]string, pend
 }
 
 func (a *App) NewIssue(ctx context.Context, title string, opts NewOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	if _, err := loadConfig(p.ConfigPath); err != nil {
 		return err
 	}
@@ -592,7 +591,7 @@ func finalizeEditedIssue(path string, number issue.IssueNumber) (string, error) 
 }
 
 func (a *App) Close(ctx context.Context, number string, opts CloseOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 
 	// Acquire lock
 	lck, err := lock.Acquire(p.SyncDir, lock.DefaultTimeout)
@@ -627,7 +626,7 @@ func (a *App) Close(ctx context.Context, number string, opts CloseOptions) error
 }
 
 func (a *App) Reopen(ctx context.Context, number string) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 
 	// Acquire lock
 	lck, err := lock.Acquire(p.SyncDir, lock.DefaultTimeout)
@@ -657,7 +656,7 @@ func (a *App) Reopen(ctx context.Context, number string) error {
 }
 
 func (a *App) Edit(ctx context.Context, number string) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	file, err := findIssueByNumber(p, number)
 	if err != nil {
 		return err
@@ -695,7 +694,7 @@ func (a *App) Edit(ctx context.Context, number string) error {
 }
 
 func (a *App) View(ctx context.Context, ref string, opts ViewOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 
 	file, err := findIssueByRef(a.Root, p, ref)
 	if err != nil {
@@ -821,7 +820,7 @@ func renderMarkdown(text string) (string, error) {
 }
 
 func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	cfg, err := loadConfig(p.ConfigPath)
 	if err != nil {
 		return err
@@ -924,7 +923,7 @@ func (a *App) DiffAll(ctx context.Context, opts DiffOptions) error {
 }
 
 func (a *App) Diff(ctx context.Context, number string, opts DiffOptions) error {
-	p := paths.New(a.Root)
+	p := a.issuePaths()
 	cfg, err := loadConfig(p.ConfigPath)
 	if err != nil {
 		return err
