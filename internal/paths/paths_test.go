@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestFindIssuesDir(t *testing.T) {
+func TestFindIssuesRoot(t *testing.T) {
 	// Create temp directory structure
 	tmp := t.TempDir()
 	gitRoot := filepath.Join(tmp, "project")
@@ -24,19 +24,19 @@ func TestFindIssuesDir(t *testing.T) {
 	}
 
 	// Should find .issues from subdirectory
-	found := FindIssuesDir(subDir)
+	found := FindIssuesRoot(subDir)
 	if found != gitRoot {
-		t.Errorf("FindIssuesDir(%s) = %q, want %q", subDir, found, gitRoot)
+		t.Errorf("FindIssuesRoot(%s) = %q, want %q", subDir, found, gitRoot)
 	}
 
 	// Should find .issues from root
-	found = FindIssuesDir(gitRoot)
+	found = FindIssuesRoot(gitRoot)
 	if found != gitRoot {
-		t.Errorf("FindIssuesDir(%s) = %q, want %q", gitRoot, found, gitRoot)
+		t.Errorf("FindIssuesRoot(%s) = %q, want %q", gitRoot, found, gitRoot)
 	}
 }
 
-func TestFindIssuesDirStopsAtGitRoot(t *testing.T) {
+func TestFindIssuesRootStopsAtGitRoot(t *testing.T) {
 	tmp := t.TempDir()
 	gitRoot := filepath.Join(tmp, "project")
 	subDir := filepath.Join(gitRoot, "src")
@@ -49,24 +49,9 @@ func TestFindIssuesDirStopsAtGitRoot(t *testing.T) {
 	}
 	// No .issues directory
 
-	found := FindIssuesDir(subDir)
+	found := FindIssuesRoot(subDir)
 	if found != "" {
-		t.Errorf("FindIssuesDir(%s) = %q, want empty (should stop at git root)", subDir, found)
-	}
-}
-
-func TestFindIssuesDirEnvOverride(t *testing.T) {
-	tmp := t.TempDir()
-	customIssues := filepath.Join(tmp, "custom-issues")
-	if err := os.MkdirAll(customIssues, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv(EnvIssuesDir, customIssues)
-
-	found := FindIssuesDir("/some/random/dir")
-	if found != tmp {
-		t.Errorf("FindIssuesDir with env = %q, want %q", found, tmp)
+		t.Errorf("FindIssuesRoot(%s) = %q, want empty (should stop at git root)", subDir, found)
 	}
 }
 

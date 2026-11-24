@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/mitsuhiko/gh-issue-sync/internal/config"
@@ -21,6 +22,8 @@ type App struct {
 	Out    io.Writer
 	Err    io.Writer
 	Theme  *theme.Theme
+
+	issuesDirOverride string
 }
 
 type PullOptions struct {
@@ -67,15 +70,33 @@ type ListOptions struct {
 	Search    string
 }
 
-func New(root string, runner ghcli.Runner, out io.Writer, errOut io.Writer) *App {
-	return &App{
-		Root:   root,
-		Runner: runner,
-		Now:    time.Now,
-		Out:    out,
-		Err:    errOut,
-		Theme:  theme.Default(),
+func New(startDir string, runner ghcli.Runner, out io.Writer, errOut io.Writer) *App {
+	root := startDir
+	override := os.Getenv(paths.EnvIssuesDir)
+	if override != "" {
+		if !filepath.IsAbs(override) {
+			override = filepath.Join(startDir, override)
+		}
+	} else if issuesRoot := paths.FindIssuesRoot(startDir); issuesRoot != "" {
+		root = issuesRoot
 	}
+
+	return &App{
+		Root:              root,
+		Runner:            runner,
+		Now:               time.Now,
+		Out:               out,
+		Err:               errOut,
+		Theme:             theme.Default(),
+		issuesDirOverride: override,
+	}
+}
+
+func (a *App) issuePaths() paths.Paths {
+	if a.issuesDirOverride != "" {
+		return paths.NewAt(a.Root, a.issuesDirOverride)
+	}
+	return paths.New(a.Root)
 }
 
 func (a *App) Init(ctx context.Context, owner, repo string) error {
@@ -93,12 +114,13 @@ func (a *App) Init(ctx context.Context, owner, repo string) error {
 	}
 
 	// Default to placing .issues next to .git
-	root := a.Root
-	if gitRoot := paths.FindGitRoot(root); gitRoot != "" {
-		root = gitRoot
+	p := a.issuePaths()
+	if a.issuesDirOverride == "" {
+		if gitRoot := paths.FindGitRoot(a.Root); gitRoot != "" {
+			p = paths.New(gitRoot)
+		}
 	}
 
-	p := paths.New(root)
 	if err := p.EnsureLayout(); err != nil {
 		return err
 	}
